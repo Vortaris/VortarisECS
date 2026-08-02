@@ -1,0 +1,12 @@
+# Normalize line endings to LF regardless of platform.
+* text=auto
+
+*.cpp text eol=lf
+*.h   text eol=lf
+*.gd  text eol=lf
+*.md  text eol=lf
+*.tscn text eol=lf
+*.godot text eol=lf
+*.gdextension text eol=lf
+SConstruct text eol=lf
+.gitignore text eol=lf
