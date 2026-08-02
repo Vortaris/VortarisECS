@@ -3,18 +3,41 @@
 
 Prerequisites:
   pip install scons
-  scons platform=windows target=template_debug arch=x86_64   # in the godot-cpp dir, to build the static lib
+  A godot-cpp checkout (https://github.com/godotengine/godot-cpp, branch
+  matching your Godot version, e.g. 4.7), pre-built with:
+      scons platform=windows target=template_debug arch=x86_64
 
 Build:
-  scons platform=windows target=template_debug arch=x86_64 build_library=False
+  scons platform=windows target=template_debug arch=x86_64 \
+        godot_cpp_path=<path-to-godot-cpp> build_library=False
 """
 
 import os
 
-# Absolute path to the godot-cpp checkout this plugin is built against.
-GODOT_CPP_PATH = r"C:/Users/Administrator/Desktop/godot-cpp-master"
+# ---------------------------------------------------------------------------
+# Locate the godot-cpp checkout. Priority:
+#   1. command line:  scons godot_cpp_path=<path>
+#   2. env var:       GODOT_CPP_PATH
+#   3. common locations: <repo>/godot-cpp, <repo>/../godot-cpp, cwd/godot-cpp
+# ---------------------------------------------------------------------------
+godot_cpp_path = ARGUMENTS.get("godot_cpp_path", "") or os.environ.get("GODOT_CPP_PATH", "")
+if not godot_cpp_path:
+    root = os.path.dirname(os.path.abspath(__file__))
+    for cand in (
+        os.path.join(root, "godot-cpp"),
+        os.path.join(root, "..", "godot-cpp"),
+        "godot-cpp",
+    ):
+        if os.path.isdir(cand):
+            godot_cpp_path = cand
+            break
+if not godot_cpp_path:
+    raise RuntimeError(
+        "godot-cpp not found. Pass godot_cpp_path=<path> on the command line "
+        "or set the GODOT_CPP_PATH environment variable."
+    )
 
-env = SConscript(os.path.join(GODOT_CPP_PATH, "SConstruct"))
+env = SConscript(os.path.join(godot_cpp_path, "SConstruct"))
 
 env.Append(CPPPATH=["src/", "demo/"])
 
