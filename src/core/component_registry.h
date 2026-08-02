@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/string_name.hpp>
 
 #include "component_schema.h"
@@ -12,15 +13,25 @@ namespace vortaris {
 
 // Global registry mapping ComponentTypeId <-> ComponentSchema <-> type name.
 //
-// Components are registered once, from C++ (via the VECS_REGISTER_COMPONENT
-// macro) at module/scene initialization time. Every archetype, serializer and
-// network layer queries this registry.
+// Components are registered either from C++ (via the VECS_REGISTER_COMPONENT
+// macro, using a concrete trivially-copyable struct) or from a script (via
+// register_schema_component, with no C++ type — the layout is computed from
+// the field descriptors). Every archetype, serializer and network layer
+// queries this registry, so both kinds behave identically.
 class ComponentRegistry {
 public:
 	static ComponentRegistry &instance();
 
 	// Registers a schema. Returns the assigned type id.
 	ComponentTypeId register_component(const ComponentSchema &p_schema);
+
+	// Registers a schema-only component (no C++ type) from raw field
+	// descriptors. byte_size / offset / alignment are computed here.
+	// Returns INVALID_COMPONENT_TYPE on failure (bad type / duplicate name).
+	ComponentTypeId register_schema_component(const godot::StringName &p_name, const std::vector<FieldDescriptor> &p_raw_fields);
+
+	// Maps a field type name ("F32", "Vector3", "Blob", ...) to FieldType.
+	static bool parse_field_type(const godot::String &p_str, FieldType &r_out);
 
 	const ComponentSchema *schema_of(ComponentTypeId p_id) const;
 	const ComponentSchema *schema_of(const godot::StringName &p_name) const;

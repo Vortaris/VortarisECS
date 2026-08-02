@@ -1,6 +1,8 @@
 #include "vecs_world.h"
 
+#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/variant.hpp>
 
 #include "../core/entity.h"
 #include "../serialization/binary_buffer.h"
@@ -50,6 +52,38 @@ void VECSWorld::set_entity_range(int64_t p_base) {
 	core_->set_entity_range(static_cast<uint32_t>(p_base));
 }
 
+bool VECSWorld::register_component(const godot::String &p_name, const godot::Array &p_fields) {
+	std::vector<vortaris::FieldDescriptor> fds;
+	fds.reserve(static_cast<size_t>(p_fields.size()));
+	for (int i = 0; i < p_fields.size(); ++i) {
+		if (p_fields[i].get_type() != godot::Variant::DICTIONARY) {
+			ERR_PRINT("VortarisECS: each field of register_component must be a Dictionary {name, type, ...}.");
+			return false;
+		}
+		godot::Dictionary d = p_fields[i];
+		godot::String fname = d.get("name", "");
+		godot::String ftype = d.get("type", "");
+		if (fname.is_empty() || ftype.is_empty()) {
+			ERR_PRINT("VortarisECS: field needs both 'name' and 'type'.");
+			return false;
+		}
+		vortaris::FieldType t;
+		if (!vortaris::ComponentRegistry::parse_field_type(ftype, t)) {
+			ERR_PRINT("VortarisECS: unknown field type '" + ftype + "'.");
+			return false;
+		}
+		vortaris::FieldDescriptor fd;
+		fd.name = godot::StringName(fname);
+		fd.type = t;
+		int64_t count = d.get("count", (int64_t)1);
+		fd.count = count > 0 ? static_cast<size_t>(count) : 1;
+		fd.sync_priority = static_cast<uint8_t>((int64_t)d.get("sync_priority", (int64_t)vortaris::SYNC_MEDIUM));
+		fd.is_networked = (bool)d.get("networked", true);
+		fds.push_back(fd);
+	}
+	return core_->registry().register_schema_component(godot::StringName(p_name), fds) != vortaris::INVALID_COMPONENT_TYPE;
+}
+
 godot::Ref<VECSComponentType> VECSWorld::get_component_type(const godot::String &p_name) {
 	vortaris::ComponentTypeId t = core_->registry().id_of(godot::StringName(p_name));
 	if (t == vortaris::INVALID_COMPONENT_TYPE) {
@@ -71,6 +105,7 @@ void VECSWorld::add_system(VECSSystem *p_system) {
 		return;
 	}
 	p_system->set_core_world(core_.get());
+	p_system->set_world_node(this);
 	p_system->_setup(*core_);
 	scheduler_->add_system(p_system);
 }
@@ -163,6 +198,7 @@ void VECSWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_alive", "entity"), &VECSWorld::is_alive);
 	ClassDB::bind_method(D_METHOD("entity_count"), &VECSWorld::entity_count);
 	ClassDB::bind_method(D_METHOD("set_entity_range", "base"), &VECSWorld::set_entity_range);
+	ClassDB::bind_method(D_METHOD("register_component", "name", "fields"), &VECSWorld::register_component);
 	ClassDB::bind_method(D_METHOD("get_component_type", "name"), &VECSWorld::get_component_type);
 	ClassDB::bind_method(D_METHOD("query"), &VECSWorld::query);
 	ClassDB::bind_method(D_METHOD("commands"), &VECSWorld::commands);

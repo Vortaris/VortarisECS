@@ -3,6 +3,7 @@
 #include <godot_cpp/core/error_macros.hpp>
 
 #include "../core/world.h"
+#include "vecs_world.h"
 
 VARIANT_ENUM_CAST(VECSSystem::FlushMode);
 
@@ -27,6 +28,8 @@ void VECSSystem::_bind_methods() {
 	using namespace godot;
 	ClassDB::bind_method(D_METHOD("get_system_name"), &VECSSystem::get_system_name);
 	ClassDB::bind_method(D_METHOD("handle", "delta"), &VECSSystem::handle);
+	ClassDB::bind_method(D_METHOD("set_world_node", "world"), &VECSSystem::set_world_node);
+	ClassDB::bind_method(D_METHOD("get_world_node"), &VECSSystem::get_world_node);
 	ClassDB::bind_method(D_METHOD("set_group", "value"), &VECSSystem::set_group);
 	ClassDB::bind_method(D_METHOD("get_group"), &VECSSystem::get_group);
 	ClassDB::bind_method(D_METHOD("set_active", "value"), &VECSSystem::set_active);

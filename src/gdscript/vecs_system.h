@@ -16,6 +16,8 @@ namespace vortaris {
 class World;
 }
 
+class VECSWorld;
+
 // Base class for ECS systems.
 //
 // C++ systems override the virtuals below and are driven by the scheduler
@@ -57,6 +59,10 @@ public:
 	// --- world access (injected by the scheduler) ---
 	vortaris::World *core_world() const { return core_; }
 	void set_core_world(vortaris::World *p_world) { core_ = p_world; }
+	// Script-facing handle to the owning VECSWorld (null for C++-only systems
+	// that never needed a node). Lets GDScript systems reach the script API.
+	void set_world_node(VECSWorld *p_world) { world_node_ = p_world; }
+	VECSWorld *get_world_node() const { return world_node_; }
 	vortaris::CommandBuffer &cmd();
 
 	// Scheduler entry: dispatches to the script override or the C++ virtual.
@@ -67,6 +73,7 @@ protected:
 
 private:
 	vortaris::World *core_ = nullptr;
+	VECSWorld *world_node_ = nullptr;
 	godot::String group = "";
 	bool active = true;
 	bool paused = false;

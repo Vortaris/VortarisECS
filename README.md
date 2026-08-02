@@ -78,7 +78,41 @@ var hits: Array = world.query() \
     .execute()
 ```
 
-## C++ systems
+## Script-defined components & systems (no C++)
+
+Components can be defined entirely from a script — no C++ struct needed. The
+framework computes the memory layout from the field declarations and stores
+them in the same SoA columns; field access, deterministic serialization and
+network sync all go through the same schema-reflection pipeline, so script
+components behave exactly like C++ ones.
+
+```gdscript
+# 1) Register a schema component (types: Bool/I8..I64/U8..U64/F32/F64/
+#    Vector2..4(i)/Color/Quaternion/Basis/Transform2D/3D/AABB/Rect2/Plane/
+#    StringFixed/Blob; optional keys: count, sync_priority, networked)
+world.register_component("Health", [
+    {"name": "amount", "type": "F32"},
+    {"name": "max", "type": "F32", "sync_priority": 0},
+])
+
+# 2) Use it exactly like a C++ component
+var e: VECSEntity = world.create_entity()
+e.add_component("Health", {"amount": 100.0, "max": 100.0})
+var h: VECSComponent = e.get_component("Health")
+h.set_field("amount", 75.0)
+
+# 3) A system written in GDScript: extend VECSSystem, override _script_process,
+#    and reach the world via get_world_node().
+var sys = preload("res://scripts/script_system.gd").new()
+sys.group = "scripts"
+world.add_system(sys)
+world.process(0.1, "scripts")
+```
+
+Both authoring styles coexist: script systems are great for game logic and
+iteration, C++ systems (next section) for performance-critical hot paths.
+
+## C++ systems (high-performance path)
 
 Components and systems are defined in C++ (compiled into the same dll for this project):
 

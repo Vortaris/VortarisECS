@@ -171,8 +171,34 @@ func _ready() -> void:
 	client_ns.free()
 	client_world.free()
 
+	# --- GDScript schema component + script system (fully scriptable) ---
+	var ok_health: bool = world.register_component("Health", [
+		{"name": "amount", "type": "F32"},
+		{"name": "max", "type": "F32", "sync_priority": 0},
+	])
+	print("register Health (schema) = ", ok_health)
+
+	var he: VECSEntity = world.create_entity()
+	he.add_component("Health", {"amount": 50.0, "max": 100.0})
+	var hc: VECSComponent = he.get_component("Health")
+	print("health.amount = ", hc.get_field("amount"))
+	hc.set_field("amount", 75.0)
+	print("health.amount after set = ", hc.get_field("amount"))
+
+	var gsys = preload("res://scripts/script_system.gd").new()
+	gsys.group = "scripts"
+	world.add_system(gsys)
+	var se: VECSEntity = world.create_entity()
+	se.add_component("Position", {"x": 0.0, "y": 0.0, "z": 0.0})
+	se.add_component("Velocity", {"x": 10.0, "y": 0.0, "z": 0.0})
+	world.process(0.1, "scripts")
+	var sep: VECSComponent = se.get_component("Position")
+	print("script-moved position.x = ", sep.get_field("x"))  # expect 1.0
+
 	world.remove_system(ms)
 	ms.free()
+	world.remove_system(gsys)
+	gsys.free()
 	print("entity_count at end = ", world.entity_count())
 
 	print("=== VortarisECS Demo OK ===")

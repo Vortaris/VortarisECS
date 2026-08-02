@@ -5,6 +5,7 @@
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 
 #include "../core/world.h"
@@ -40,6 +41,10 @@ public:
 	void set_entity_range(int64_t p_base);
 
 	// ---- component types ----
+	// Registers a schema-only component from a script: no C++ struct needed.
+	// `fields` is an Array of Dictionaries: {"name", "type", "count"?, "sync_priority"?, "networked"?}
+	// (type is one of the FieldType names: "F32", "Vector3", "Blob", ...).
+	bool register_component(const godot::String &p_name, const godot::Array &p_fields);
 	godot::Ref<VECSComponentType> get_component_type(const godot::String &p_name);
 
 	// ---- query / commands ----
