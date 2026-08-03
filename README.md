@@ -171,6 +171,39 @@ component (e.g. `Falling`), and the system only queries entities carrying it.
 See `demo/scripts/falling_system.gd` + `sand_observer.gd` for the full sand
 falling example.
 
+## JSON saves & data tables
+
+Deeply integrated with Godot's own `JSON` class — pass in/out plain
+`Dictionary` / `Array` / `String`, stringify/parse with the engine:
+
+```gdscript
+# World save (archive): serialize → stringify → write file
+var text: String = JSON.stringify(world.serialize_snapshot_json(), "\t")
+FileAccess.open("user://save.json", FileAccess.WRITE).store_string(text)
+
+# Load: read file → feed the JSON string straight back in
+var ok: bool = world.deserialize_snapshot_json(FileAccess.get_file_as_string("user://save.json"))
+```
+
+```gdscript
+# Data tables (e.g. cards): bulk-register component schemas, batch-spawn
+world.register_components({
+    "Card":   [{"name": "title", "type": "StringFixed", "count": 64}],
+    "Effect": [{"name": "damage", "type": "F32"}, {"name": "kind", "type": "I32"}],
+    "Cost":   [{"name": "mana", "type": "I32"}],
+})
+var deck: Array = world.spawn_from_data([
+    {"components": {"Card": {"title": "Fireball"}, "Effect": {"damage": 15.0}, "Cost": {"mana": 3}}},
+    # ... typically produced by a CSV→JSON pipeline
+])
+var exported: Array = world.entities_to_data()   # [{ "id", "components": {...} }, ...]
+```
+
+`deserialize_snapshot_json` accepts either a `Dictionary` (already parsed) or
+a JSON `String`; unknown components are skipped with a warning, entity ids are
+preserved (preassigned) and the save carries a version number. Script
+(schema-only) components serialize identically to C++ ones.
+
 ## Network sync
 
 ```gdscript

@@ -227,6 +227,32 @@ func _ready() -> void:
 	world.process(0.016, "viewtest")
 	print("ViewSystem changed_count = ", vs.get_changed_count())  # 期望 ≥1
 
+	# --- JSON 序列化 / 数据表 (深度绑定 Godot 自带 JSON) ---
+	# 卡牌:批量注册组件 schema + 从数据表批量生成实体
+	world.register_components({
+		"Card":   [{"name": "title", "type": "StringFixed", "count": 64}],
+		"Effect": [{"name": "damage", "type": "F32"}, {"name": "kind", "type": "I32"}],
+		"Cost":   [{"name": "mana", "type": "I32"}],
+	})
+	var deck: Array = world.spawn_from_data([
+		{"components": {"Card": {"title": "火球术"}, "Effect": {"damage": 15.0}, "Cost": {"mana": 3}}},
+		{"components": {"Card": {"title": "治疗术"}, "Effect": {"kind": 2}, "Cost": {"mana": 2}}},
+	])
+	print("spawned cards = ", deck.size())
+	var card_title: VECSComponent = deck[0].get_component("Card")
+	print("card0 title = ", card_title.get_field("title"), ", damage = ", deck[0].get_component("Effect").get_field("damage"))
+
+	# JSON 世界存档:序列化 → JSON.stringify → parse → 反序列化到新世界
+	var save_dict: Dictionary = world.serialize_snapshot_json()
+	var save_text: String = JSON.stringify(save_dict, "\t")
+	print("save json length = ", save_text.length())
+	var loaded_world: VECSWorld = VECSWorld.new()
+	var load_ok: bool = loaded_world.deserialize_snapshot_json(save_text)   # 直接吃 JSON 字符串
+	print("json load ok = ", load_ok, ", loaded entities = ", loaded_world.entity_count())
+	var exported: Array = loaded_world.entities_to_data()
+	print("exported entities = ", exported.size())
+	loaded_world.free()
+
 	world.remove_system(vs); vs.free()
 	world.remove_observer(sand_obs); sand_obs.free()
 	world.remove_system(fall_sys); fall_sys.free()

@@ -71,6 +71,19 @@ public:
 	godot::PackedByteArray serialize_snapshot() const;
 	bool deserialize_snapshot(const godot::PackedByteArray &p_data);
 
+	// ---- JSON / data-table helpers (deep Godot integration) ----
+	// Registers several schema components at once: { "Name": [ {name,type,...}, ... ], ... }
+	bool register_components(const godot::Dictionary &p_components);
+	// Batch-creates entities from data: [{ "id"?: int, "components": { "Name": {fields...} } }, ...].
+	// Returns the created VECSEntity array (entities that failed to spawn are skipped).
+	godot::Array spawn_from_data(const godot::Array &p_entities);
+	// Exports every entity as [{ "id", "components": { "Name": {fields...} } }] (deterministic order).
+	godot::Array entities_to_data();
+	// World save as a JSON-able Dictionary: { "version", "entities": [...] }.
+	godot::Dictionary serialize_snapshot_json();
+	// Loads a world save. Accepts either a Dictionary or a JSON String (parsed with Godot's JSON).
+	bool deserialize_snapshot_json(const godot::Variant &p_data);
+
 protected:
 	static void _bind_methods();
 

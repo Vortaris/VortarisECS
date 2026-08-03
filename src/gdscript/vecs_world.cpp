@@ -1,11 +1,17 @@
 #include "vecs_world.h"
 
+#include <algorithm>
+
+#include <godot_cpp/classes/json.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/variant.hpp>
 
+#include "../core/archetype.h"
 #include "../core/entity.h"
+#include "../reflect/type_traits.h"
 #include "../serialization/binary_buffer.h"
+#include "../serialization/snapshot.h"
 #include "vecs_command_buffer.h"
 #include "vecs_component_type.h"
 #include "vecs_entity.h"
@@ -190,6 +196,123 @@ bool VECSWorld::deserialize_snapshot(const godot::PackedByteArray &p_data) {
 	return core_->deserialize_snapshot(buf);
 }
 
+bool VECSWorld::register_components(const godot::Dictionary &p_components) {
+	const godot::Array names = p_components.keys();
+	for (int i = 0; i < names.size(); ++i) {
+		const godot::String name = names[i];
+		const godot::Array fields = p_components[name];
+		if (!register_component(name, fields)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+godot::Array VECSWorld::spawn_from_data(const godot::Array &p_entities) {
+	godot::Array out;
+	for (int i = 0; i < p_entities.size(); ++i) {
+		if (p_entities[i].get_type() != godot::Variant::DICTIONARY) {
+			ERR_PRINT("VortarisECS: spawn_from_data entry must be a Dictionary.");
+			continue;
+		}
+		const godot::Dictionary edata = p_entities[i];
+		godot::Ref<VECSEntity> ent;
+		if (edata.has("id")) {
+			const int64_t id = edata["id"];
+			ent = create_entity_preassigned(id);
+		} else {
+			ent = create_entity();
+		}
+		if (!ent.is_valid()) {
+			ERR_PRINT("VortarisECS: failed to create entity from data (id conflict?).");
+			continue;
+		}
+		if (edata.has("components")) {
+			const godot::Dictionary comps = edata["components"];
+			const godot::Array comp_names = comps.keys();
+			for (int j = 0; j < comp_names.size(); ++j) {
+				const godot::String cname = comp_names[j];
+				const godot::Dictionary fields = comps[cname];
+				ent->add_component(cname, fields);
+			}
+		}
+		out.append(ent);
+	}
+	return out;
+}
+
+godot::Array VECSWorld::entities_to_data() {
+	godot::Array out;
+	vortaris::World &w = core();
+	std::vector<vortaris::Archetype *> arches = w.all_archetypes();
+	std::sort(arches.begin(), arches.end(), [](const vortaris::Archetype *a, const vortaris::Archetype *b) {
+		return a->signature < b->signature;
+	});
+	for (const vortaris::Archetype *a : arches) {
+		for (size_t row = 0; row < a->entities.size(); ++row) {
+			godot::Dictionary edata;
+			edata["id"] = static_cast<int64_t>(a->entities[row].id);
+			godot::Dictionary comps;
+			for (size_t i = 0; i < a->component_ids.size(); ++i) {
+				const vortaris::ComponentTypeId t = a->component_ids[i];
+				const vortaris::ComponentSchema *s = vortaris::ComponentRegistry::instance().schema_of(t);
+				if (!s) {
+					continue;
+				}
+				godot::Dictionary fields;
+				vortaris::component_bytes_to_variant_dict(*s, a->columns[i].row(row), fields);
+				comps[godot::String(vortaris::ComponentRegistry::instance().name_of(t))] = fields;
+			}
+			edata["components"] = comps;
+			out.append(edata);
+		}
+	}
+	return out;
+}
+
+godot::Dictionary VECSWorld::serialize_snapshot_json() {
+	godot::Dictionary out;
+	out["version"] = static_cast<int64_t>(vortaris::SNAPSHOT_VERSION);
+	out["entities"] = entities_to_data();
+	return out;
+}
+
+bool VECSWorld::deserialize_snapshot_json(const godot::Variant &p_data) {
+	godot::Dictionary root;
+	if (p_data.get_type() == godot::Variant::STRING) {
+		const godot::Variant parsed = godot::JSON::parse_string(p_data);
+		if (parsed.get_type() != godot::Variant::DICTIONARY) {
+			ERR_PRINT("VortarisECS: invalid JSON save data.");
+			return false;
+		}
+		root = parsed;
+	} else if (p_data.get_type() == godot::Variant::DICTIONARY) {
+		root = p_data;
+	} else {
+		ERR_PRINT("VortarisECS: deserialize_snapshot_json expects a Dictionary or a JSON String.");
+		return false;
+	}
+
+	if (root.has("version")) {
+		const int64_t v = root["version"];
+		if (v != static_cast<int64_t>(vortaris::SNAPSHOT_VERSION)) {
+			ERR_PRINT("VortarisECS: save version mismatch (got " + godot::String::num_int64(v) + ", expected " + godot::String::num_int64(vortaris::SNAPSHOT_VERSION) + ").");
+			return false;
+		}
+	}
+	if (!root.has("entities")) {
+		ERR_PRINT("VortarisECS: save data has no 'entities'.");
+		return false;
+	}
+	const godot::Array ents = root["entities"];
+	const godot::Array spawned = spawn_from_data(ents);
+	if (spawned.size() != ents.size()) {
+		ERR_PRINT("VortarisECS: some entities failed to deserialize.");
+		return false;
+	}
+	return true;
+}
+
 void VECSWorld::_bind_methods() {
 	using namespace godot;
 	ClassDB::bind_method(D_METHOD("create_entity"), &VECSWorld::create_entity);
@@ -213,4 +336,9 @@ void VECSWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_world"), &VECSWorld::get_world);
 	ClassDB::bind_method(D_METHOD("serialize_snapshot"), &VECSWorld::serialize_snapshot);
 	ClassDB::bind_method(D_METHOD("deserialize_snapshot", "data"), &VECSWorld::deserialize_snapshot);
+	ClassDB::bind_method(D_METHOD("register_components", "components"), &VECSWorld::register_components);
+	ClassDB::bind_method(D_METHOD("spawn_from_data", "entities"), &VECSWorld::spawn_from_data);
+	ClassDB::bind_method(D_METHOD("entities_to_data"), &VECSWorld::entities_to_data);
+	ClassDB::bind_method(D_METHOD("serialize_snapshot_json"), &VECSWorld::serialize_snapshot_json);
+	ClassDB::bind_method(D_METHOD("deserialize_snapshot_json", "data"), &VECSWorld::deserialize_snapshot_json);
 }
