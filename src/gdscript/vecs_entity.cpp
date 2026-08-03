@@ -34,6 +34,19 @@ bool VECSEntity::has_component(const godot::String &p_type_name) const {
 	return t != vortaris::INVALID_COMPONENT_TYPE && world_->has(entity(), t);
 }
 
+godot::Array VECSEntity::get_component_types() const {
+	godot::Array out;
+	if (!world_ || !world_->is_alive(entity())) {
+		return out;
+	}
+	std::vector<vortaris::ComponentTypeId> types;
+	world_->get_entity_component_types(entity(), types);
+	for (vortaris::ComponentTypeId t : types) {
+		out.append(godot::String(vortaris::ComponentRegistry::instance().name_of(t)));
+	}
+	return out;
+}
+
 godot::Ref<VECSComponent> VECSEntity::get_component(const godot::String &p_type_name) const {
 	if (!is_alive()) {
 		return godot::Ref<VECSComponent>();
@@ -87,6 +100,7 @@ void VECSEntity::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_alive"), &VECSEntity::is_alive);
 	ClassDB::bind_method(D_METHOD("get_id"), &VECSEntity::get_id);
 	ClassDB::bind_method(D_METHOD("has_component", "type_name"), &VECSEntity::has_component);
+	ClassDB::bind_method(D_METHOD("get_component_types"), &VECSEntity::get_component_types);
 	ClassDB::bind_method(D_METHOD("get_component", "type_name"), &VECSEntity::get_component);
 	ClassDB::bind_method(D_METHOD("add_component", "type_name", "fields"), &VECSEntity::add_component, DEFVAL(Dictionary()));
 	ClassDB::bind_method(D_METHOD("remove_component", "type_name"), &VECSEntity::remove_component);

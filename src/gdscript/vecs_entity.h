@@ -31,6 +31,7 @@ public:
 	bool is_alive() const;
 	int64_t get_id() const;
 	bool has_component(const godot::String &p_type_name) const;
+	godot::Array get_component_types() const;
 	godot::Ref<VECSComponent> get_component(const godot::String &p_type_name) const;
 	void add_component(const godot::String &p_type_name, const godot::Dictionary &p_fields);
 	void remove_component(const godot::String &p_type_name);

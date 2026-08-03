@@ -233,6 +233,9 @@ void World::for_each(F &&p_fn) {
 	const auto &arches = query_cache_.match(q, archetype_list_);
 	for (Archetype *a : arches) {
 		for (size_t row = 0; row < a->entities.size(); ++row) {
+			if (!is_alive(a->entities[row])) {
+				continue; // defensive: skip stale rows from edge-case structural churn
+			}
 			detail::for_each_row<Comps...>(p_fn, a, row, ids,
 					std::make_index_sequence<sizeof...(Comps)>{});
 		}
@@ -250,6 +253,9 @@ void World::for_each_enabled(F &&p_fn) {
 		for (size_t row = 0; row < a->entities.size(); ++row) {
 			if (!a->get_enabled(row)) {
 				continue;
+			}
+			if (!is_alive(a->entities[row])) {
+				continue; // defensive: skip stale rows from edge-case structural churn
 			}
 			detail::for_each_row<Comps...>(p_fn, a, row, ids,
 					std::make_index_sequence<sizeof...(Comps)>{});
@@ -286,6 +292,9 @@ public:
 		const auto &arches = world_->query_cache().match(query_, world_->all_archetypes());
 		for (Archetype *a : arches) {
 			for (size_t row = 0; row < a->entities.size(); ++row) {
+				if (!world_->is_alive(a->entities[row])) {
+					continue; // defensive: skip stale rows from edge-case churn
+				}
 				detail::for_each_row<Comps...>(p_fn, a, row, ids_,
 						std::make_index_sequence<sizeof...(Comps)>{});
 			}
