@@ -195,6 +195,42 @@ func _ready() -> void:
 	var sep: VECSComponent = se.get_component("Position")
 	print("script-moved position.x = ", sep.get_field("x"))  # expect 1.0
 
+	# --- 活跃集 + 事件驱动:沙子下落 (事件进入活跃集,系统只处理活跃集) ---
+	world.register_component("Falling", [{"name": "time", "type": "F32"}])
+
+	var sand_obs = preload("res://scripts/sand_observer.gd").new()
+	sand_obs.on_custom()
+	sand_obs.set_custom_event_name("sand_support_broken")
+	world.add_observer(sand_obs)
+
+	var fall_sys = preload("res://scripts/falling_system.gd").new()
+	fall_sys.group = "sand"
+	world.add_system(fall_sys)
+
+	var sand: VECSEntity = world.create_entity()
+	sand.add_component("Position", {"x": 0.0, "y": 10.0, "z": 0.0})
+	print("sand y before = ", sand.get_component("Position").get_field("y"))
+
+	world.emit_event("sand_support_broken", sand, {})   # 事件 → 加入活跃集(Falling)
+	world.process(0.5, "sand")                          # 只处理活跃集,下落 0.5s
+	print("sand y after 0.5s = ", sand.get_component("Position").get_field("y"))  # 期望 7.5
+
+	# --- C++ View(预缓存) + ChangeView(变更感知) ---
+	var vs: ViewSystem = ViewSystem.new()
+	vs.group = "viewtest"
+	world.add_system(vs)
+	world.process(0.016, "viewtest")
+	print("ViewSystem view_count = ", vs.get_view_count())
+	var tv: VECSEntity = world.query().with_all(["Position"]).execute_one()
+	var tvp: VECSComponent = tv.get_component("Position")
+	tvp.set_field("x", 123.0)                            # 制造一次 Position 变更
+	world.process(0.016, "viewtest")
+	print("ViewSystem changed_count = ", vs.get_changed_count())  # 期望 ≥1
+
+	world.remove_system(vs); vs.free()
+	world.remove_observer(sand_obs); sand_obs.free()
+	world.remove_system(fall_sys); fall_sys.free()
+
 	world.remove_system(ms)
 	ms.free()
 	world.remove_system(gsys)

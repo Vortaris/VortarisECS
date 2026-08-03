@@ -128,7 +128,7 @@ VECS_REGISTER_COMPONENT(Position,
 class MoveSystem : public VECSSystem {
     GDCLASS(MoveSystem, VECSSystem)
 public:
-    void _run(vortaris::World &w, double delta) override {
+    void _tick(vortaris::World &w, double delta) override {
         const float dt = float(delta);
         w.for_each<Position, Velocity>([&](vortaris::Entity e, Position &pos, Velocity &vel) {
             pos.x += vel.x * dt;
@@ -138,6 +138,38 @@ public:
     }
 };
 ```
+
+## Cached views & change-aware iteration
+
+`for_each` rebuilds its query each call (cheap — the QueryCache is incremental),
+but a system that wants an explicit data contract can hold a `View`: compile the
+query once in `_setup`, then reuse it every tick. `ChangeView` goes further: it
+pins a baseline and `take()` returns only the entities whose watched components
+were **written since the previous take** — ideal for sparse, event-driven
+systems (sand falling, AI triggers) that shouldn't re-scan the whole set.
+
+```cpp
+class GravitySystem : public VECSSystem {
+    GDCLASS(GravitySystem, VECSSystem)
+public:
+    void _setup(vortaris::World &w) override {
+        view_    = w.view<Position, Velocity>();  // compile once
+        changes_ = w.changes<GravityBlock>();     // change-aware
+    }
+    void _tick(vortaris::World &w, double dt) override {
+        view_.each([](vortaris::Entity e, Position &p, Velocity &v) { /* ... */ });
+        for (vortaris::Entity e : changes_.take()) { /* only changed rows */ }
+    }
+private:
+    vortaris::View<Position, Velocity> view_;
+    vortaris::ChangeView<GravityBlock> changes_;
+};
+```
+
+The script equivalent is an **active set**: an event/observer adds a marker
+component (e.g. `Falling`), and the system only queries entities carrying it.
+See `demo/scripts/falling_system.gd` + `sand_observer.gd` for the full sand
+falling example.
 
 ## Network sync
 

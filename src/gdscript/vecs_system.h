@@ -36,7 +36,7 @@ public:
 
 	// --- C++ override points ---
 	virtual void _setup(vortaris::World &p_world) {}
-	virtual void _run(vortaris::World &p_world, double p_delta) {}
+	virtual void _tick(vortaris::World &p_world, double p_delta) {}
 	virtual void _deps(std::vector<vortaris::SystemDep> &r_deps) {}
 
 	// --- GDScript override point ---

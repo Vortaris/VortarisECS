@@ -20,7 +20,7 @@ void VECSSystem::handle(double p_delta) {
 	if (_gdvirtual__script_process_overridden()) {
 		_gdvirtual__script_process_call(p_delta);
 	} else {
-		_run(*core_, p_delta);
+		_tick(*core_, p_delta);
 	}
 }
 

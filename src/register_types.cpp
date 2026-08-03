@@ -39,6 +39,7 @@ void initialize_vortarisecs_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_VIRTUAL_CLASS(VECSSystem);
 	GDREGISTER_VIRTUAL_CLASS(VECSObserver);
 	GDREGISTER_CLASS(MoveSystem);
+	GDREGISTER_CLASS(ViewSystem);
 	GDREGISTER_CLASS(VECSSyncStrategy);
 	GDREGISTER_CLASS(VECSSnapshotReplication);
 	GDREGISTER_CLASS(VECSNetworkSync);

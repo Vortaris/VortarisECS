@@ -22,6 +22,11 @@ namespace vortaris {
 
 class BinaryBuffer;
 
+template <class... Comps>
+class View;
+template <class... Comps>
+class ChangeView;
+
 struct EntityLocation {
 	Archetype *archetype = nullptr;
 	uint32_t row = 0;
@@ -93,6 +98,12 @@ public:
 	void for_each(F &&p_fn);
 	template <class... Comps, class F>
 	void for_each_enabled(F &&p_fn);
+
+	// ---- cached views / change-aware views ----
+	template <class... Comps>
+	View<Comps...> view(); // compile once, reuse across ticks
+	template <class... Comps>
+	ChangeView<Comps...> changes(); // yield entities whose Comps changed since last take()
 
 	// ---- change clock ----
 	uint32_t change_tick() const { return change_tick_; }
@@ -244,6 +255,127 @@ void World::for_each_enabled(F &&p_fn) {
 					std::make_index_sequence<sizeof...(Comps)>{});
 		}
 	}
+}
+
+// Cached, reusable view over every entity matching Comps... The query is
+// compiled once in the constructor; each()/count() then run through the
+// incrementally-maintained QueryCache, so repeated ticks cost no query
+// construction and no per-entity scan. Typed references, zero Variant.
+//
+//   auto view = world.view<Position, Velocity>();
+//   view.each([](Entity e, Position &pos, Velocity &vel) { ... });
+template <class... Comps>
+class View {
+public:
+	// Default-constructed views are empty; assign from World::view<T>() in
+	// a system's _setup().
+	View() = default;
+
+	View(World &p_world) :
+			world_(&p_world) {
+		ids_ = { type_id_of<Comps>()... };
+		query_.all.assign(ids_.begin(), ids_.end());
+		std::sort(query_.all.begin(), query_.all.end());
+	}
+
+	template <class F>
+	void each(F &&p_fn) {
+		if (!world_) {
+			return;
+		}
+		const auto &arches = world_->query_cache().match(query_, world_->all_archetypes());
+		for (Archetype *a : arches) {
+			for (size_t row = 0; row < a->entities.size(); ++row) {
+				detail::for_each_row<Comps...>(p_fn, a, row, ids_,
+						std::make_index_sequence<sizeof...(Comps)>{});
+			}
+		}
+	}
+
+	size_t count() const {
+		if (!world_) {
+			return 0;
+		}
+		Query q = query_;
+		const auto &arches = world_->query_cache().match(q, world_->all_archetypes());
+		size_t n = 0;
+		for (const Archetype *a : arches) {
+			n += a->entities.size();
+		}
+		return n;
+	}
+
+private:
+	World *world_ = nullptr;
+	std::array<ComponentTypeId, sizeof...(Comps)> ids_;
+	Query query_;
+};
+
+// Change-aware view. It pins a baseline change tick; take() returns every
+// entity whose watched component column was written since the previous take(),
+// then advances the baseline. Ideal for sparse / event-driven systems: instead
+// of re-processing the whole matching set every tick, handle only the rows that
+// actually changed since the last pass.
+//
+//   auto changed = world.changes<GravityBlock>();
+//   for (Entity e : changed.take()) { ... }
+template <class... Comps>
+class ChangeView {
+public:
+	ChangeView() = default;
+
+	ChangeView(World &p_world) :
+			world_(&p_world),
+			baseline_(p_world.change_tick()) {
+		ids_ = { type_id_of<Comps>()... };
+		query_.all.assign(ids_.begin(), ids_.end());
+		std::sort(query_.all.begin(), query_.all.end());
+	}
+
+	std::vector<Entity> take() {
+		std::vector<Entity> out;
+		if (!world_) {
+			return out;
+		}
+		const auto &arches = world_->query_cache().match(query_, world_->all_archetypes());
+		for (Archetype *a : arches) {
+			for (ComponentTypeId t : ids_) {
+				if (a->has_component(t)) {
+					a->column(t).ensure_versions();
+				}
+			}
+			for (size_t row = 0; row < a->entities.size(); ++row) {
+				bool changed = false;
+				for (ComponentTypeId t : ids_) {
+					if (a->has_component(t) && a->column(t).row_changed_since(row, baseline_)) {
+						changed = true;
+						break;
+					}
+				}
+				if (changed) {
+					out.push_back(a->entities[row]);
+				}
+			}
+		}
+		baseline_ = world_->change_tick();
+		return out;
+	}
+
+private:
+	World *world_;
+	uint32_t baseline_;
+	std::array<ComponentTypeId, sizeof...(Comps)> ids_;
+	Query query_;
+};
+
+template <class... Comps>
+View<Comps...> World::view() {
+	return View<Comps...>(*this);
+}
+
+template <class... Comps>
+ChangeView<Comps...> World::changes() {
+	return ChangeView<Comps...>(*this);
 }
 
 } // namespace vortaris
