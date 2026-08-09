@@ -22,7 +22,10 @@ import os
 # ---------------------------------------------------------------------------
 godot_cpp_path = ARGUMENTS.get("godot_cpp_path", "") or os.environ.get("GODOT_CPP_PATH", "")
 if not godot_cpp_path:
-    root = os.path.dirname(os.path.abspath(__file__))
+    # `__file__` is not exposed by some SCons/Python 3.14 combinations; fall back
+    # to the current directory (scons is run from the repo root).
+    sconstruct_dir = os.path.dirname(os.path.abspath(globals().get("__file__", os.getcwd())))
+    root = sconstruct_dir
     for cand in (
         os.path.join(root, "godot-cpp"),
         os.path.join(root, "..", "godot-cpp"),
