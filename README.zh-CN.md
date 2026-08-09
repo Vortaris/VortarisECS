@@ -1,0 +1,259 @@
+[English](README.md) | **简体中文**
+
+# VortarisECS
+
+一个为 **Godot 4.7** 打造的现代数据导向 ECS（实体-组件-系统）框架，用 C++ 编写，以 GDExtension（godot-cpp）形式提供。易用、健壮、可扩展，并支持网络同步。
+
+设计参考：[GECS](https://github.com/BlockBreaker-Studios/GECS) —— 其 archetype SoA 存储、分层实体 id、延迟命令缓冲、查询构建器、观察者与分层网络同步模式均移植到了原生 C++。
+
+## 特性
+
+- **纯 C++ 数据组件** —— 组件是平凡可拷贝的结构体，存储在缓存友好的 archetype 列（SoA）中。声明式 schema 宏把字段暴露给 GDScript 访问和二进制序列化。
+- **轻量实体句柄** —— 64 位分层 id（槽位 + 代数）；O(1) 过期句柄检测；支持网络预分配 id。
+- **快速查询** —— archetype 成员判定 O(1)；增量维护的查询缓存；`.changed()` 变更检测。
+- **延迟命令缓冲** —— 批量结构性变更，每个实体只做一次 archetype 迁移、每次 flush 只失效一次缓存。
+- **C++ 优先的系统** —— 类型化 `world.for_each<Position, Velocity>` 热路径零 Variant 开销；分组调度支持依赖排序、逐系统定时器与 flush 模式；GDScript 系统通过 `_script_process`。
+- **观察者 / 事件** —— ADDED / REMOVED / CHANGED / MATCHED / UNMATCHED / 自定义事件，支持重入安全。
+- **确定性二进制序列化** —— 小端、定宽、逐字节一致（byte-identical）的快照。
+- **可插拔网络同步** —— `VECSSyncStrategy` 抽象 + 默认的服务器权威快照复制（脏检查增量 + 定期对账 + 反幽灵）。传输层是 Godot 的 MultiplayerAPI（RPC），另附进程内直连测试传输。
+
+## 架构
+
+```
+GDScript 层（VECS 前缀类）                C++ 核心（namespace vortaris）
+─────────────────────────────────────      ─────────────────────────────
+VECSWorld（Node / "VECS" 单例） ──────────► World
+VECSEntity（RefCounted 句柄）   ──────────► Entity（64 位分层 id）
+VECSComponent（字段访问器）     ──────────► Archetype（SoA 列）
+VECSQueryBuilder（链式）        ──────────► Query / QueryCache
+VECSCommandBuffer               ──────────► CommandBuffer（延迟操作）
+VECSSystem（Node，虚方法）      ──────────► SystemScheduler（分组/拓扑）
+VECSObserver（Node，事件钩子）  ──────────► ObserverDispatch
+VECSBinaryBuffer / 快照 API     ──────────► BinaryBuffer / snapshot
+VECSNetworkSync（Node，RPC）    ──────────► VECSSyncStrategy（可插拔）
+                                                └─ VECSSnapshotReplication（默认）
+```
+
+## 构建（Windows / MSVC）
+
+插件链接 **godot-cpp**（外部依赖）。先获取它（必须匹配 Godot 4.7）：
+
+```bash
+git clone -b 4.7 https://github.com/godotengine/godot-cpp.git godot-cpp
+pip install scons
+```
+
+然后构建静态库与插件（把 `SConstruct` 里的 `GODOT_CPP_PATH` 指向你的 checkout，或加 `godot_cpp_path=` 参数）：
+
+```bash
+cd godot-cpp
+scons platform=windows target=template_debug arch=x86_64
+scons platform=windows target=template_release arch=x86_64   # 供 release 导出
+cd <此仓库>
+scons platform=windows target=template_debug arch=x86_64 build_library=False
+```
+
+输出在 `demo/bin/vortarisecs.windows.*.dll`。第一次在 Godot 中打开 `demo/` 时，编辑器会生成 `.godot/extension_list.cfg`（注册扩展）。
+
+运行 demo（功能 + 性能）：
+
+```
+godot --headless --path demo
+godot --headless --path demo --script res://scripts/perf_test.gd
+```
+
+## 快速上手（GDScript）
+
+一份简短的端到端教程见 [`docs/quickstart.md`](docs/quickstart.md)（可作为 `demo/scripts/quickstart.gd` 运行）。**便捷 API** 用几行代码就能完成简单功能：
+
+```gdscript
+var world: VECSWorld = VECS.get_world()
+
+world.register_component("Pos", [{"name": "x", "type": "F32"}, {"name": "y", "type": "F32"}])
+world.register_component("Vel", [{"name": "x", "type": "F32"}])
+
+var e := world.spawn({"Pos": {"x": 1.0, "y": 2.0}, "Vel": {"x": 0.5}})   # 一行创建实体
+
+world.each(["Pos", "Vel"], func(ent: VECSEntity) -> void:                 # 迭代，不物化 Array
+    ent.setf("Pos", "x", ent.getf("Pos", "x") + ent.getf("Vel", "x")))
+```
+
+完整 API 用更显式的控制做同样的事——组件访问器、链式查询构建器、命令缓冲，以及类型化 C++ 迭代：
+
+```gdscript
+var world: VECSWorld = VECS.get_world()
+
+var e: VECSEntity = world.create_entity()
+e.add_component("Position", {"x": 1.0, "y": 2.0, "z": 0.0})
+e.add_component("Velocity", {"x": 0.5, "y": 0.0, "z": 0.0})
+
+var pos: VECSComponent = e.get_component("Position")
+pos.set_field("x", 3.0)                       # 标记该行已变更
+
+var hits: Array = world.query() \
+    .with_all(["Position", "Velocity"]) \
+    .enabled() \
+    .execute()
+```
+
+## 脚本定义组件与系统（无需 C++）
+
+组件可以完全用脚本定义——不需要 C++ 结构体。框架根据字段声明计算内存布局，存进相同的 SoA 列；字段访问、确定性序列化与网络同步都走同一条 schema 反射流水线，因此脚本组件与 C++ 组件行为完全一致。
+
+```gdscript
+# 1) 注册 schema 组件（类型：Bool/I8..I64/U8..U64/F32/F64/
+#    Vector2..4(i)/Color/Quaternion/Basis/Transform2D/3D/AABB/Rect2/Plane/
+#    StringFixed/Blob；可选键：count、sync_priority、networked）
+world.register_component("Health", [
+    {"name": "amount", "type": "F32"},
+    {"name": "max", "type": "F32", "sync_priority": 0},
+])
+
+# 2) 与 C++ 组件用法完全一致
+var e: VECSEntity = world.create_entity()
+e.add_component("Health", {"amount": 100.0, "max": 100.0})
+var h: VECSComponent = e.get_component("Health")
+h.set_field("amount", 75.0)
+
+# 3) 用 GDScript 写系统：继承 VECSSystem、覆写 _script_process、
+#    通过 get_world_node() 拿到世界
+var sys = preload("res://scripts/script_system.gd").new()
+sys.group = "scripts"
+world.add_system(sys)
+world.process(0.1, "scripts")
+```
+
+两种编写风格共存：脚本系统适合游戏逻辑与快速迭代，C++ 系统（下一节）适合性能敏感的热路径。
+
+## C++ 系统（高性能路径）
+
+组件与系统在 C++ 中定义（本项目中编译进同一个 dll）：
+
+```cpp
+// components.h
+struct Position { float x = 0, y = 0, z = 0; };
+VECS_REGISTER_COMPONENT(Position,
+    VECS_FIELD(Position, x, F32),
+    VECS_FIELD(Position, y, F32),
+    VECS_FIELD(Position, z, F32));
+
+// systems.h
+class MoveSystem : public VECSSystem {
+    GDCLASS(MoveSystem, VECSSystem)
+public:
+    void _tick(vortaris::World &w, double delta) override {
+        const float dt = float(delta);
+        w.for_each<Position, Velocity>([&](vortaris::Entity e, Position &pos, Velocity &vel) {
+            pos.x += vel.x * dt;
+            pos.y += vel.y * dt;
+            pos.z += vel.z * dt;
+        });
+    }
+};
+```
+
+## 缓存视图与变更感知迭代
+
+`for_each` 每次调用都会重建查询（开销很小——QueryCache 是增量式的），但想要显式数据契约的系统可以持有 `View`：在 `_setup` 里编译一次查询，之后每帧复用。`ChangeView` 更进一步：它钉住一个基线，`take()` 只返回**自上次 take 以来被写入过**的所关注组件——非常适合稀疏、事件驱动的系统（沙子下落、AI 触发器），不必重新扫描全集。
+
+```cpp
+class GravitySystem : public VECSSystem {
+    GDCLASS(GravitySystem, VECSSystem)
+public:
+    void _setup(vortaris::World &w) override {
+        view_    = w.view<Position, Velocity>();  // 编译一次
+        changes_ = w.changes<GravityBlock>();     // 变更感知
+    }
+    void _tick(vortaris::World &w, double dt) override {
+        view_.each([](vortaris::Entity e, Position &p, Velocity &v) { /* ... */ });
+        for (vortaris::Entity e : changes_.take()) { /* 只处理变更行 */ }
+    }
+private:
+    vortaris::View<Position, Velocity> view_;
+    vortaris::ChangeView<GravityBlock> changes_;
+};
+```
+
+脚本侧的等价物是**活跃集**：事件/观察者给实体加一个标记组件（如 `Falling`），系统只查询携带该标记的实体。完整沙子下落示例见 `demo/scripts/falling_system.gd` + `sand_observer.gd`。
+
+## 迭代契约
+
+**迭代期间绝不**发起结构性变更（增删组件、销毁实体）——`for_each`、`View::each` 与 `VECSWorld::each` 正在遍历存活的 archetype 行，结构性变更会让行在遍历器脚下移动。把它们延迟到命令缓冲（`world.commands()`），或在循环之外做：
+
+```cpp
+w.for_each<Position>([&](vortaris::Entity e, Position &pos) {
+    // 读取/写入组件值没问题……
+});
+// ……但循环内增删组件、销毁实体是不允许的。请延迟：
+// w.commands().add_component(...) 然后统一 flush。
+```
+
+框架会强制执行：迭代期间发起结构性变更会被**报错拒绝**，而不是静默破坏迭代（过去会导致随机跳过 / 读到过期行）。
+
+## JSON 存档与数据表
+
+与 Godot 自带的 `JSON` 类深度集成——传入/传出普通的 `Dictionary` / `Array` / `String`，用引擎负责 stringify/parse：
+
+```gdscript
+# 世界存档：序列化 → stringify → 写文件
+var text: String = JSON.stringify(world.serialize_snapshot_json(), "\t")
+FileAccess.open("user://save.json", FileAccess.WRITE).store_string(text)
+
+# 读档：读文件 → 直接把 JSON 字符串喂回去
+var ok: bool = world.deserialize_snapshot_json(FileAccess.get_file_as_string("user://save.json"))
+```
+
+```gdscript
+# 数据表（例如卡牌）：批量注册组件 schema、按数据表批量生成实体
+world.register_components({
+    "Card":   [{"name": "title", "type": "StringFixed", "count": 64}],
+    "Effect": [{"name": "damage", "type": "F32"}, {"name": "kind", "type": "I32"}],
+    "Cost":   [{"name": "mana", "type": "I32"}],
+})
+var deck: Array = world.spawn_from_data([
+    {"components": {"Card": {"title": "火球术"}, "Effect": {"damage": 15.0}, "Cost": {"mana": 3}}},
+    # ... 通常由 CSV→JSON 流水线产生
+])
+var exported: Array = world.entities_to_data()   # [{ "id", "components": {...} }, ...]
+```
+
+`deserialize_snapshot_json` 接受 `Dictionary`（已解析）或 JSON `String`；未知组件跳过并告警，实体 id 保留（preassigned），存档带版本号。脚本（schema-only）组件与 C++ 组件序列化完全一致。
+
+## 网络同步
+
+```gdscript
+var server_ns: VECSNetworkSync = VECSNetworkSync.new()
+server_ns.set_server(true)
+server_ns.bind_world(world)              # 服务器世界
+
+var client_ns: VECSNetworkSync = VECSNetworkSync.new()
+client_ns.bind_world(client_world)       # 客户端世界
+server_ns.set_direct_peer(client_ns)     # 测试传输（真实模式走 RPC）
+
+server_ns.tick(delta)                    # 服务器每帧调用
+```
+
+组件自动联网：至少含一个联网组件（默认）的实体会被生成（spawn），其脏字段作为增量（delta）推送，被销毁的实体取消生成（despawn）。定期对账广播全量状态（反幽灵）。
+
+## 性能（Windows x64，10 万实体）
+
+| 操作 | 时间 |
+|---|---|
+| `for_each<Position, Velocity>`（C++） | **0.43 ms** |
+| Query count | 0.02 ms |
+| Create（经 GDScript API） | 219 ms |
+| 快照序列化 / 反序列化 | 13 / 39 ms |
+
+（本仓库机器实测基线；此前数字为 0.37 ms / 3.85 ms，这是移除迭代热路径中每行的 `is_alive` 查找之后的结果。）
+
+## 目录结构
+
+```
+src/core/          纯 C++ ECS 核心（无 Godot 对象）
+src/reflect/       组件 schema 宏 + Variant 转换
+src/serialization/ 确定性二进制缓冲、组件编解码、快照
+src/network/       VECSNetworkSync + 可插拔同步策略
+src/gdscript/      GDScript 侧类（VECS 前缀）
+src/demo/          编译进 dll 的示例组件/系统
+demo/              Godot 项目（验收场景 + 性能测试）
+```
