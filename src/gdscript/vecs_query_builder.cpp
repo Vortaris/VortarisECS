@@ -61,12 +61,7 @@ godot::Ref<VECSQueryBuilder> VECSQueryBuilder::changed(const godot::Array &p_nam
 	return godot::Ref<VECSQueryBuilder>(this);
 }
 
-godot::Array VECSQueryBuilder::execute() {
-	godot::Array result;
-	if (!world_) {
-		return result;
-	}
-
+vortaris::Query VECSQueryBuilder::_compile_query() const {
 	vortaris::Query q;
 	q.all = all_;
 	q.any = any_;
@@ -74,18 +69,48 @@ godot::Array VECSQueryBuilder::execute() {
 	std::sort(q.all.begin(), q.all.end());
 	std::sort(q.any.begin(), q.any.end());
 	std::sort(q.none.begin(), q.none.end());
+	return q;
+}
 
+uint64_t VECSQueryBuilder::_baseline_key(const vortaris::Query &p_q) const {
+	uint64_t h = p_q.membership_signature();
+	std::vector<vortaris::ComponentTypeId> ids = changed_;
+	std::sort(ids.begin(), ids.end());
+	// Domain tag + FNV-1a mix of the changed set, matching the mix used in
+	// Query::membership_signature.
+	h ^= 0x9E3779B97F4A7C15ull;
+	h *= 1099511628211ull;
+	for (vortaris::ComponentTypeId id : ids) {
+		uint32_t v = id;
+		for (int i = 0; i < 4; ++i) {
+			h ^= (v & 0xFF);
+			h *= 1099511628211ull;
+			v >>= 8;
+		}
+	}
+	return h;
+}
+
+godot::Array VECSQueryBuilder::execute() {
+	godot::Array result;
+	if (!world_) {
+		return result;
+	}
+
+	vortaris::Query q = _compile_query();
 	const auto &arches = world_->query_cache().match(q, world_->all_archetypes());
 
 	bool has_changed_filter = !changed_.empty();
 	uint32_t baseline = 0;
+	uint64_t key = 0;
 	if (has_changed_filter) {
+		key = _baseline_key(q);
 		bool existed = false;
-		baseline = world_->changed_baseline(q.membership_signature(), &existed);
+		baseline = world_->changed_baseline(key, &existed);
 		for (vortaris::Archetype *a : arches) {
 			for (vortaris::ComponentTypeId t : changed_) {
 				if (a->has_component(t)) {
-					a->column(t).ensure_versions();
+					a->column(t).ensure_versions(world_->change_tick());
 				}
 			}
 		}
@@ -113,47 +138,72 @@ godot::Array VECSQueryBuilder::execute() {
 	}
 
 	if (has_changed_filter) {
-		world_->set_changed_baseline(q.membership_signature(), world_->change_tick());
+		world_->set_changed_baseline(key, world_->change_tick());
 	}
 	return result;
 }
 
 godot::Ref<VECSEntity> VECSQueryBuilder::execute_one() {
+	godot::Ref<VECSEntity> result;
 	if (!world_) {
-		return godot::Ref<VECSEntity>();
+		return result;
 	}
-	vortaris::Query q;
-	q.all = all_;
-	q.any = any_;
-	q.none = none_;
-	std::sort(q.all.begin(), q.all.end());
-	std::sort(q.any.begin(), q.any.end());
-	std::sort(q.none.begin(), q.none.end());
-
+	vortaris::Query q = _compile_query();
 	const auto &arches = world_->query_cache().match(q, world_->all_archetypes());
+
+	bool has_changed_filter = !changed_.empty();
+	uint32_t baseline = 0;
+	uint64_t key = 0;
+	if (has_changed_filter) {
+		key = _baseline_key(q);
+		bool existed = false;
+		baseline = world_->changed_baseline(key, &existed);
+		for (vortaris::Archetype *a : arches) {
+			for (vortaris::ComponentTypeId t : changed_) {
+				if (a->has_component(t)) {
+					a->column(t).ensure_versions(world_->change_tick());
+				}
+			}
+		}
+	}
+
 	for (vortaris::Archetype *a : arches) {
 		for (size_t row = 0; row < a->entities.size(); ++row) {
 			if (enabled_only_ && !a->get_enabled(row)) {
 				continue;
 			}
-			return VECSEntity::make(world_, a->entities[row]);
+			if (has_changed_filter) {
+				bool any_changed = false;
+				for (vortaris::ComponentTypeId t : changed_) {
+					if (a->has_component(t) && a->column(t).row_changed_since(row, baseline)) {
+						any_changed = true;
+						break;
+					}
+				}
+				if (!any_changed) {
+					continue;
+				}
+			}
+			result = VECSEntity::make(world_, a->entities[row]);
+			break;
+		}
+		if (result.is_valid()) {
+			break;
 		}
 	}
-	return godot::Ref<VECSEntity>();
+
+	// Advance the baseline even when nothing matched, mirroring execute().
+	if (has_changed_filter) {
+		world_->set_changed_baseline(key, world_->change_tick());
+	}
+	return result;
 }
 
 int64_t VECSQueryBuilder::count() {
 	if (!world_) {
 		return 0;
 	}
-	vortaris::Query q;
-	q.all = all_;
-	q.any = any_;
-	q.none = none_;
-	std::sort(q.all.begin(), q.all.end());
-	std::sort(q.any.begin(), q.any.end());
-	std::sort(q.none.begin(), q.none.end());
-
+	vortaris::Query q = _compile_query();
 	const auto &arches = world_->query_cache().match(q, world_->all_archetypes());
 	int64_t n = 0;
 	for (vortaris::Archetype *a : arches) {

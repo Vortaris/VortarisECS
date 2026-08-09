@@ -233,7 +233,7 @@ void World::mark_changed(Entity p_e, ComponentTypeId p_t) {
 		return;
 	}
 	Column &col = a->column(p_t);
-	col.ensure_versions();
+	col.ensure_versions(change_tick_);
 	col.mark_changed(it->second.row, ++change_tick_);
 	observer_dispatch_.dispatch(ObserverEventType::Changed, p_e, p_t, godot::String(), godot::Variant());
 }
@@ -459,77 +459,74 @@ void World::_commit_deferred_move(Entity p_e) {
 	const std::vector<PendingComponentOp> &ops = pit->second;
 	std::unordered_set<ComponentTypeId> original_set(cur->component_ids.begin(), cur->component_ids.end());
 
-	// Compute the desired final component set by applying ops in order.
-	std::vector<ComponentTypeId> final_ids = cur->component_ids;
-	std::unordered_set<ComponentTypeId> final_set(final_ids.begin(), final_ids.end());
-	std::vector<const std::vector<uint8_t> *> pending_add_data;
-	pending_add_data.reserve(ops.size());
-	std::vector<ComponentTypeId> pending_add_types;
-	pending_add_types.reserve(ops.size());
-
+	// Apply ops in order to compute the desired final component set. The final
+	// set is the single source of truth: an add inserts a type, a remove erases
+	// it, so [add A, remove A] nets to "no A" and [remove A, add A] to "has A".
+	// For every type that survives, keep the data of its LAST add op (later
+	// writes win); types never written keep their existing value.
+	std::unordered_set<ComponentTypeId> final_set = original_set;
+	std::unordered_map<ComponentTypeId, const std::vector<uint8_t> *> last_add_data;
 	for (const auto &op : ops) {
 		if (op.add) {
-			if (final_set.insert(op.type).second) {
-				final_ids.push_back(op.type);
-			}
-			pending_add_types.push_back(op.type);
-			pending_add_data.push_back(op.data.empty() ? nullptr : &op.data);
+			final_set.insert(op.type);
+			last_add_data[op.type] = op.data.empty() ? nullptr : &op.data;
 		} else {
 			final_set.erase(op.type);
 		}
 	}
+
+	std::vector<ComponentTypeId> final_ids(final_set.begin(), final_set.end());
 	std::sort(final_ids.begin(), final_ids.end());
 
 	bool structural = final_ids.size() != cur->component_ids.size() ||
 			!std::equal(final_ids.begin(), final_ids.end(), cur->component_ids.begin());
 
-	if (!structural) {
-		// Same component set: overwrite in place, no archetype transition.
-		uint32_t row = it->second.row;
-		for (size_t i = 0; i < pending_add_types.size(); ++i) {
-			ComponentTypeId t = pending_add_types[i];
-			Column &col = cur->column(t);
-			void *dst = col.row(row);
-			if (pending_add_data[i]) {
-				std::memcpy(dst, pending_add_data[i]->data(), pending_add_data[i]->size());
-			} else {
-				const ComponentSchema *s = registry().schema_of(t);
-				std::memset(dst, 0, s->size);
-			}
-			col.mark_changed(row, ++change_tick_);
-		}
-		for (const auto &op : ops) {
-			if (op.add) {
-				observer_dispatch_.dispatch(ObserverEventType::Changed, p_e, op.type, godot::String(), godot::Variant());
-			}
-		}
-		return;
+	Archetype *host = cur;
+	uint32_t row;
+	if (structural) {
+		host = _ensure_archetype(final_ids);
+		uint32_t new_row = _move_entity_to(p_e, cur, host, it->second.row);
+		entity_locations_[p_e] = { host, new_row };
+		row = new_row;
+	} else {
+		row = it->second.row;
 	}
 
-	Archetype *target = _ensure_archetype(final_ids);
-	uint32_t new_row = _move_entity_to(p_e, cur, target, it->second.row);
-	entity_locations_[p_e] = { target, new_row };
-	for (size_t i = 0; i < pending_add_types.size(); ++i) {
-		ComponentTypeId t = pending_add_types[i];
-		Column &col = target->column(t);
-		void *dst = col.row(new_row);
-		if (pending_add_data[i]) {
-			std::memcpy(dst, pending_add_data[i]->data(), pending_add_data[i]->size());
+	// Apply surviving component writes (value of the last add op for the type).
+	for (ComponentTypeId t : final_ids) {
+		auto addit = last_add_data.find(t);
+		if (addit == last_add_data.end()) {
+			continue;
+		}
+		Column &col = host->column(t);
+		void *dst = col.row(row);
+		if (addit->second) {
+			std::memcpy(dst, addit->second->data(), addit->second->size());
 		} else {
 			const ComponentSchema *s = registry().schema_of(t);
 			std::memset(dst, 0, s->size);
 		}
-		col.mark_changed(new_row, ++change_tick_);
+		col.mark_changed(row, ++change_tick_);
 	}
-	for (const auto &op : ops) {
-		if (op.add) {
-			bool was_present = original_set.count(op.type) > 0;
-			observer_dispatch_.dispatch(was_present ? ObserverEventType::Changed : ObserverEventType::Added, p_e, op.type, godot::String(), godot::Variant());
-		} else {
-			observer_dispatch_.dispatch(ObserverEventType::Removed, p_e, op.type, godot::String(), godot::Variant());
+
+	// Dispatch net-change events, one per type against the original set:
+	// final \ original -> Added, original \ final -> Removed, present in both
+	// and actually written -> Changed.
+	for (ComponentTypeId t : final_ids) {
+		if (original_set.count(t) == 0) {
+			observer_dispatch_.dispatch(ObserverEventType::Added, p_e, t, godot::String(), godot::Variant());
+		} else if (last_add_data.count(t) > 0) {
+			observer_dispatch_.dispatch(ObserverEventType::Changed, p_e, t, godot::String(), godot::Variant());
 		}
 	}
-	_invalidate_cache();
+	for (ComponentTypeId t : cur->component_ids) {
+		if (final_set.count(t) == 0) {
+			observer_dispatch_.dispatch(ObserverEventType::Removed, p_e, t, godot::String(), godot::Variant());
+		}
+	}
+	if (structural) {
+		_invalidate_cache();
+	}
 }
 
 uint32_t World::_move_entity_to(Entity p_e, Archetype *p_from, Archetype *p_to, uint32_t p_from_row) {

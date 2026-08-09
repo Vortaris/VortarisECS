@@ -350,7 +350,7 @@ public:
 		for (Archetype *a : arches) {
 			for (ComponentTypeId t : ids_) {
 				if (a->has_component(t)) {
-					a->column(t).ensure_versions();
+					a->column(t).ensure_versions(world_->change_tick());
 				}
 			}
 			for (size_t row = 0; row < a->entities.size(); ++row) {

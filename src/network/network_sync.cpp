@@ -334,6 +334,15 @@ void VECSSnapshotReplication::apply_delta(VECSNetworkSync &p_ns, const vortaris:
 				return;
 			}
 			if (!w.is_alive(e)) {
+				// The entity died locally (e.g. despawned while this delta was in
+				// flight). We still must consume the component's bytes so the read
+				// cursor stays aligned for the remaining entries; without this the
+				// following reads would parse component payloads as type ids.
+				static thread_local std::vector<uint8_t> scratch;
+				scratch.assign(s->size, 0);
+				if (!vortaris::deserialize_component(*s, scratch.data(), in)) {
+					return;
+				}
 				continue;
 			}
 			w.add_raw(e, t, nullptr);
@@ -342,7 +351,9 @@ void VECSSnapshotReplication::apply_delta(VECSNetworkSync &p_ns, const vortaris:
 				return;
 			}
 		}
-		client_replicated_.insert(e);
+		if (w.is_alive(e)) {
+			client_replicated_.insert(e);
+		}
 	}
 }
 

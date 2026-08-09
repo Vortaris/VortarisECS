@@ -111,10 +111,14 @@ public:
 	size_t elem_align() const { return elem_align_; }
 
 	// --- change tracking (lazily allocated, only for .changed() queries) ---
-	void ensure_versions() {
+	// Rows that predate the first enable are stamped with `p_tick` rather than
+	// 0: a change query whose baseline was set earlier (or starts at 0) must
+	// report pre-enable rows once, otherwise every write that happened before
+	// tracking was turned on is silently lost.
+	void ensure_versions(uint32_t p_tick) {
 		if (!tracking_) {
 			tracking_ = true;
-			versions_.assign(size_, 0);
+			versions_.assign(size_, p_tick);
 		}
 	}
 	void mark_changed(size_t i, uint32_t p_tick) {

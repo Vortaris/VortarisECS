@@ -12,6 +12,7 @@
 
 namespace vortaris {
 class World;
+struct Query;
 }
 
 class VECSEntity;
@@ -48,4 +49,9 @@ private:
 	bool enabled_only_ = false;
 
 	std::vector<vortaris::ComponentTypeId> resolve(const godot::Array &p_names) const;
+	vortaris::Query _compile_query() const;
+	// Baseline key = membership signature mixed with the sorted changed() ids,
+	// so queries differing only in their changed filter get distinct baselines
+	// and never advance each other's baseline (which would drop changes).
+	uint64_t _baseline_key(const vortaris::Query &p_q) const;
 };
