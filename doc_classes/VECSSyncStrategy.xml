@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VECSSyncStrategy" inherits="RefCounted" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		Pluggable replication strategy used by [VECSNetworkSync].
+	</brief_description>
+	<description>
+		[b]VECSSyncStrategy[/b] is the abstraction a [VECSNetworkSync] uses to replicate world state. Subclass it to implement a custom strategy (deterministic lockstep, event-only sync, ...); assign it with [method VECSNetworkSync.set_strategy].
+
+		The default implementation is [VECSSnapshotReplication] (server-authoritative dirty-checking + reconciliation).
+	</description>
+	<tutorials>
+		<link title="README (Network sync)">https://github.com/Vortaris/VortarisECS/blob/main/README.md</link>
+	</tutorials>
+</class>

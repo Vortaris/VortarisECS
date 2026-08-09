@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VECSQueryBuilder" inherits="RefCounted" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		A fluent, chainable query builder for the ECS world.
+	</brief_description>
+	<description>
+		[b]VECSQueryBuilder[/b] describes which entities to select. Every term method returns [code]this[/code] so calls can be chained, then one of the terminal methods runs the query:
+
+		[codeblock]
+		var hits: Array = world.query() \
+		    .with_all(["Position", "Velocity"]) \
+		    .enabled() \
+		    .execute()
+		[/codeblock]
+
+		Query construction is cheap — matching is cached incrementally in the core, so repeated queries cost little. Obtain a builder from [method VECSWorld.query].
+	</description>
+	<tutorials>
+		<link title="Quickstart">https://github.com/Vortaris/VortarisECS/blob/main/docs/quickstart.md</link>
+	</tutorials>
+	<methods>
+		<method name="changed">
+			<return type="VECSQueryBuilder" />
+			<param index="0" name="names" type="Array" default="[]" />
+			<description>
+				Restricts the query to entities whose named components were written since the previous execution of a query with the same membership and changed set. The baseline is tracked per query, so filters do not interfere. Ideal for sparse, event-driven systems.
+			</description>
+		</method>
+		<method name="count">
+			<return type="int" />
+			<description>
+				Returns the number of matching entities without materializing them.
+			</description>
+		</method>
+		<method name="enabled">
+			<return type="VECSQueryBuilder" />
+			<description>
+				Restricts the query to entities whose enabled flag is set (via [method VECSSystem]-independent entity enable/disable state).
+			</description>
+		</method>
+		<method name="execute">
+			<return type="Array" />
+			<description>
+				Runs the query and returns an [Array] of matching [VECSEntity] handles. For large result sets consider [method VECSWorld.each] to avoid materializing the array.
+			</description>
+		</method>
+		<method name="execute_one">
+			<return type="VECSEntity" />
+			<description>
+				Runs the query and returns the first matching entity (or a null handle if none match). Honors the same filters as [method execute], including [method changed].
+			</description>
+		</method>
+		<method name="with_all">
+			<return type="VECSQueryBuilder" />
+			<param index="0" name="names" type="Array" />
+			<description>
+				Requires the entity to have every component named in [param names]. Unknown names are ignored with an error printed.
+			</description>
+		</method>
+		<method name="with_any">
+			<return type="VECSQueryBuilder" />
+			<param index="0" name="names" type="Array" />
+			<description>
+				Requires the entity to have at least one of the components named in [param names].
+			</description>
+		</method>
+		<method name="with_none">
+			<return type="VECSQueryBuilder" />
+			<param index="0" name="names" type="Array" />
+			<description>
+				Requires the entity to have none of the components named in [param names].
+			</description>
+		</method>
+	</methods>
+</class>

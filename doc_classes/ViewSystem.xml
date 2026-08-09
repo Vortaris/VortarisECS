@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="ViewSystem" inherits="VECSSystem" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		Demo C++ system exercising cached [code]View[/code] and change-aware [code]ChangeView[/code] iteration.
+	</brief_description>
+	<description>
+		An example system compiled into the extension. It builds a cached [code]World::view&lt;Position&gt;[/code] and a change-aware [code]ChangeView&lt;Position&gt;[/code] in [code]_setup[/code], then counts the entities seen by each on every tick. Demonstrates compile-once views and change-aware iteration.
+	</description>
+	<tutorials>
+		<link title="README (Cached views)">https://github.com/Vortaris/VortarisECS/blob/main/README.md</link>
+	</tutorials>
+	<methods>
+		<method name="get_changed_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many entities the change-aware view reported on the last tick.
+			</description>
+		</method>
+		<method name="get_view_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many entities the cached view saw on the last tick.
+			</description>
+		</method>
+	</methods>
+</class>

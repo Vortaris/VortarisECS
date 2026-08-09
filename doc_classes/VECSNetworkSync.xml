@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VECSNetworkSync" inherits="Node" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		Central network coordinator: binds a world to a sync strategy and exposes the RPC transport.
+	</brief_description>
+	<description>
+		[b]VECSNetworkSync[/b] connects one [VECSWorld] to a [VECSSyncStrategy] (default: [VECSSnapshotReplication]) and drives replication. On the server, call [method tick] each frame; the strategy spawns networked entities, pushes dirty fields as deltas, despawns destroyed entities and periodically broadcasts a full state for reconciliation.
+
+		Transport is Godot's MultiplayerAPI (RPC); for testing, connect two nodes with [method set_direct_peer] to deliver packets in-process without a network.
+	</description>
+	<tutorials>
+		<link title="README (Network sync)">https://github.com/Vortaris/VortarisECS/blob/main/README.md</link>
+	</tutorials>
+	<methods>
+		<method name="bind_world">
+			<return type="void" />
+			<param index="0" name="world" type="VECSWorld" />
+			<description>
+				Binds this sync node to [param world]. Registers an observer that forwards component events to the strategy and seeds the strategy from the current world contents.
+			</description>
+		</method>
+		<method name="get_direct_peer" qualifiers="const">
+			<return type="VECSNetworkSync" />
+			<description>
+				Returns the in-process peer set with [method set_direct_peer].
+			</description>
+		</method>
+		<method name="get_session_id" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the current replication session id. Packets carrying an older session id are ignored.
+			</description>
+		</method>
+		<method name="get_strategy" qualifiers="const">
+			<return type="VECSSyncStrategy" />
+			<description>
+				Returns the active sync strategy.
+			</description>
+		</method>
+		<method name="is_server" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if this node is configured as the authoritative server.
+			</description>
+		</method>
+		<method name="request_full_state">
+			<return type="void" />
+			<description>
+				Immediately broadcasts a full-state snapshot to every connected peer (reconciliation).
+			</description>
+		</method>
+		<method name="reset">
+			<return type="void" />
+			<description>
+				Unregisters the world observer and resets the strategy's tracked state.
+			</description>
+		</method>
+		<method name="set_direct_peer">
+			<return type="void" />
+			<param index="0" name="peer" type="VECSNetworkSync" />
+			<description>
+				Sets an in-process peer for testing: packets are delivered directly to [param peer] instead of going through the RPC layer.
+			</description>
+		</method>
+		<method name="set_server">
+			<return type="void" />
+			<param index="0" name="value" type="bool" />
+			<description>
+				Sets whether this node acts as the authoritative server.
+			</description>
+		</method>
+		<method name="set_session_id">
+			<return type="void" />
+			<param index="0" name="value" type="int" />
+			<description>
+				Sets the replication session id; packets from older sessions are dropped.
+			</description>
+		</method>
+		<method name="set_strategy">
+			<return type="void" />
+			<param index="0" name="strategy" type="VECSSyncStrategy" />
+			<description>
+				Swaps in a custom [VECSSyncStrategy] implementation. The new strategy is seeded from the current world.
+			</description>
+		</method>
+		<method name="tick">
+			<return type="void" />
+			<param index="0" name="delta" type="float" />
+			<description>
+				Drives the strategy once per frame with [param delta] seconds. On the server this sends spawns, deltas, despawns and periodic reconciliations.
+			</description>
+		</method>
+	</methods>
+</class>

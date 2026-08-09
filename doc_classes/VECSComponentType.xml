@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VECSComponentType" inherits="RefCounted" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		Immutable metadata for a registered component type.
+	</brief_description>
+	<description>
+		[b]VECSComponentType[/b] describes a component type registered either from C++ or from a script via [method VECSWorld.register_component]. It exposes the type's name, id, memory size and per-field metadata (sync priority, networked flag). Obtain it with [method VECSWorld.get_component_type].
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_field_is_networked" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="field" type="String" />
+			<description>
+				Returns [code]true[/code] if the field [param field] participates in network replication.
+			</description>
+		</method>
+		<method name="get_field_names" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns the names of every field on this component type, in declaration order.
+			</description>
+		</method>
+		<method name="get_field_sync_priority" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="field" type="String" />
+			<description>
+				Returns the network sync priority of the field [param field]: [code]0[/code] realtime, [code]1[/code] high, [code]2[/code] medium, [code]3[/code] low, [code]4[/code] spawn-only, [code]5[/code] local (never networked).
+			</description>
+		</method>
+		<method name="get_id" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the internal numeric type id.
+			</description>
+		</method>
+		<method name="get_name" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns the registered name of this component type.
+			</description>
+		</method>
+		<method name="get_size" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the byte size of one instance of this component.
+			</description>
+		</method>
+	</methods>
+</class>

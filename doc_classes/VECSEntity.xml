@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VECSEntity" inherits="RefCounted" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		A lightweight, garbage-collected handle to an ECS entity.
+	</brief_description>
+	<description>
+		[b]VECSEntity[/b] wraps a 64-bit entity id (slot + generation) and gives GDScript access to the entity's components. Handles are transient: validity is checked against the owning world on every access, so a stale handle (from a destroyed or recycled entity) reports [method is_alive] as [code]false[/code] instead of corrupting data.
+
+		Obtain handles from [method VECSWorld.create_entity], [method VECSWorld.spawn], [method VECSWorld.spawn_from_data] or query results. Use [method get_component] to get a [VECSComponent] field accessor, or the convenience [method getf] / [method setf] for one-call field access.
+	</description>
+	<tutorials>
+		<link title="Quickstart">https://github.com/Vortaris/VortarisECS/blob/main/docs/quickstart.md</link>
+	</tutorials>
+	<methods>
+		<method name="add_component">
+			<return type="void" />
+			<param index="0" name="type_name" type="String" />
+			<param index="1" name="fields" type="Dictionary" default="{}" />
+			<description>
+				Adds a component of type [param type_name] to this entity, initializing its fields from [param fields] (absent fields default to zero). Issuing this inside an iteration is an error; use [method VECSCommandBuffer.add_component] to defer it.
+			</description>
+		</method>
+		<method name="equals" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="other" type="VECSEntity" />
+			<description>
+				Returns [code]true[/code] if [param other] refers to the same entity id.
+			</description>
+		</method>
+		<method name="get_component" qualifiers="const">
+			<return type="VECSComponent" />
+			<param index="0" name="type_name" type="String" />
+			<description>
+				Returns a [VECSComponent] accessor for the component [param type_name], or a null handle if this entity does not have it (or is dead).
+			</description>
+		</method>
+		<method name="get_component_types" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns the names of every component currently attached to this entity.
+			</description>
+		</method>
+		<method name="get_id" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the entity's raw 64-bit id (slot + generation). Stable across worlds, so it can be used for snapshot loading and network replication.
+			</description>
+		</method>
+		<method name="getf" qualifiers="const">
+			<return type="Variant" />
+			<param index="0" name="comp" type="String" />
+			<param index="1" name="field" type="String" />
+			<description>
+				Convenience sugar for [method get_component].get_field: reads a single field in one call. Returns [code]null[/code] if the component or field does not exist.
+			</description>
+		</method>
+		<method name="has_component" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="type_name" type="String" />
+			<description>
+				Returns [code]true[/code] if this entity currently has a component of type [param type_name].
+			</description>
+		</method>
+		<method name="hash_value" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns a stable hash of the entity id, usable as a dictionary key.
+			</description>
+		</method>
+		<method name="is_alive" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if this handle still refers to a live entity in its world.
+			</description>
+		</method>
+		<method name="remove_component">
+			<return type="void" />
+			<param index="0" name="type_name" type="String" />
+			<description>
+				Removes the component [param type_name] from this entity, dispatching a REMOVED event. Issuing this inside an iteration is an error; use [method VECSCommandBuffer.remove_component] to defer it.
+			</description>
+		</method>
+		<method name="setf">
+			<return type="void" />
+			<param index="0" name="comp" type="String" />
+			<param index="1" name="field" type="String" />
+			<param index="2" name="value" type="Variant" />
+			<description>
+				Convenience sugar for [method get_component].set_field: writes a single field in one call and marks it changed. No-op if the component or field does not exist.
+			</description>
+		</method>
+	</methods>
+</class>

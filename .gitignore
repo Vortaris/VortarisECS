@@ -6,6 +6,7 @@
 
 # ─── Build artifacts (GDExtension / SCons) ─────────────────────────────────
 .sconsign.dblite
+src/gen/
 *.obj
 *.o
 *.os

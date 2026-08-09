@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VECSSystem" inherits="Node" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		Base class for ECS systems, ticked by the scheduler.
+	</brief_description>
+	<description>
+		[b]VECSSystem[/b] is the base class for game logic that runs over the ECS world. Register an instance with [method VECSWorld.add_system] and tick its group with [method VECSWorld.process].
+
+		Two authoring styles coexist:
+		- [b]GDScript systems[/b] override [method _script_process] and reach the world through [method get_world_node] using the script API.
+		- [b]C++ systems[/b] (compiled into the extension) override the C++ virtuals [code]_setup[/code], [code]_tick[/code] and [code]_deps[/code] for zero-Variant hot paths.
+
+		The scheduler respects [member group], [member active], [member paused], [member tick_interval] and [member flush_mode].
+	</description>
+	<tutorials>
+		<link title="Quickstart">https://github.com/Vortaris/VortarisECS/blob/main/docs/quickstart.md</link>
+	</tutorials>
+	<methods>
+		<method name="_script_process" qualifiers="virtual">
+			<return type="void" />
+			<param index="0" name="delta" type="float" />
+			<description>
+				GDScript override point, called when the system ticks. [param delta] is the time step in seconds. Reach the world via [method get_world_node].
+			</description>
+		</method>
+		<method name="get_system_name" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns the system's name (the node name).
+			</description>
+		</method>
+		<method name="get_world_node" qualifiers="const">
+			<return type="VECSWorld" />
+			<description>
+				Returns the owning [VECSWorld] node (may be null for C++-only systems that never needed it).
+			</description>
+		</method>
+		<method name="handle">
+			<return type="void" />
+			<param index="0" name="delta" type="float" />
+			<description>
+				Scheduler entry point: dispatches to the script override [method _script_process] or the C++ [code]_tick[/code] virtual. Called automatically by the scheduler; you normally do not call it directly.
+			</description>
+		</method>
+		<method name="set_world_node">
+			<return type="void" />
+			<param index="0" name="world" type="VECSWorld" />
+			<description>
+				Injects the owning [VECSWorld] node. Called by the scheduler when the system is registered.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="active" type="bool" setter="set_active" getter="get_active" default="true">
+			If [code]false[/code], the scheduler skips this system entirely.
+		</member>
+		<member name="flush_mode" type="int" setter="set_flush_mode" getter="get_flush_mode" default="0">
+			Controls when the deferred command buffer is flushed: [constant PER_SYSTEM] after every system, [constant PER_GROUP] once per group, or [constant MANUAL] only when you call it yourself.
+		</member>
+		<member name="group" type="String" setter="set_group" getter="get_group" default="&quot;&quot;">
+			The group this system belongs to; it only ticks when [method VECSWorld.process] is called with the same group name.
+		</member>
+		<member name="paused" type="bool" setter="set_paused" getter="get_paused" default="false">
+			If [code]true[/code], the system is skipped while still remaining registered.
+		</member>
+		<member name="tick_interval" type="float" setter="set_tick_interval" getter="get_tick_interval" default="0.0">
+			Minimum time (seconds) between two ticks; [code]0.0[/code] ticks every frame. Useful for throttling low-priority systems.
+		</member>
+	</members>
+	<constants>
+		<constant name="PER_SYSTEM" value="0" enum="FlushMode">
+			Flush the command buffer after this system runs.
+		</constant>
+		<constant name="PER_GROUP" value="1" enum="FlushMode">
+			Flush the command buffer once after the whole group runs.
+		</constant>
+		<constant name="MANUAL" value="2" enum="FlushMode">
+			Never auto-flush; the user flushes via [method VECSCommandBuffer.flush].
+		</constant>
+	</constants>
+</class>

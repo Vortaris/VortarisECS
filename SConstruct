@@ -54,6 +54,15 @@ sources = (
     + ["src/register_types.cpp"]
 )
 
+# GDExtension class reference (doc_classes/*.xml) is compiled into editor /
+# template_debug builds so the in-editor help (F1) and class reference show the
+# documentation. Skipped for release builds, where it is not needed.
+if env["target"] in ["editor", "template_debug"]:
+    doc_xml = Glob("doc_classes/*.xml")
+    if doc_xml:
+        doc_data = env.GodotCPPDocData("src/gen/doc_data.gen.cpp", source=doc_xml)
+        sources = sources + [doc_data]
+
 library = env.SharedLibrary(
     "demo/bin/vortarisecs{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
     source=sources,

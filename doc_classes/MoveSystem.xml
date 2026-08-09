@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="MoveSystem" inherits="VECSSystem" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		Demo C++ system that integrates Position and Velocity components.
+	</brief_description>
+	<description>
+		An example system compiled into the extension. For every entity with both [code]Position[/code] and [code]Velocity[/code], it adds [code]velocity * delta[/code] to position. Demonstrates the typed [code]World::for_each&lt;Position, Velocity&gt;[/code] hot path with zero Variant overhead.
+	</description>
+	<tutorials>
+		<link title="README (C++ systems)">https://github.com/Vortaris/VortarisECS/blob/main/README.md</link>
+	</tutorials>
+	<methods>
+		<method name="get_processed_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many entities the system processed on its last tick (used by tests and the demo).
+			</description>
+		</method>
+	</methods>
+</class>

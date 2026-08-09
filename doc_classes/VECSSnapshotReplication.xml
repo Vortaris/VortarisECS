@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VECSSnapshotReplication" inherits="VECSSyncStrategy" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		Default server-authoritative replication: dirty-checked deltas + periodic full-state reconciliation.
+	</brief_description>
+	<description>
+		[b]VECSSnapshotReplication[/b] is the default [VECSSyncStrategy]. The server tracks which networked components are dirty, sends spawns/deltas/despawns, and periodically broadcasts a full state so clients can reconcile and remove ghosts. Entities with at least one networked component (the default) replicate automatically.
+	</description>
+	<tutorials>
+		<link title="README (Network sync)">https://github.com/Vortaris/VortarisECS/blob/main/README.md</link>
+	</tutorials>
+	<members>
+		<member name="reconciliation_interval" type="float" setter="set_reconciliation_interval" getter="get_reconciliation_interval" default="30.0">
+			Seconds between periodic full-state broadcasts. Lower it for faster convergence at the cost of bandwidth.
+		</member>
+	</members>
+</class>

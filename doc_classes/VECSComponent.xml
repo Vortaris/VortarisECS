@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VECSComponent" inherits="RefCounted" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		A field-level accessor for one component instance attached to an entity.
+	</brief_description>
+	<description>
+		[b]VECSComponent[/b] is a transient accessor obtained from [method VECSEntity.get_component]. Reads and writes go straight to the entity's archetype column, so every [method set_field] is reflected immediately and marks the row as changed (which feeds [code].changed()[/code] queries).
+
+		The accessor stays valid for the lifetime of the entity; after a structural change the underlying storage may move, so re-fetch the accessor if you keep it across such changes.
+	</description>
+	<tutorials>
+		<link title="Quickstart">https://github.com/Vortaris/VortarisECS/blob/main/docs/quickstart.md</link>
+	</tutorials>
+	<methods>
+		<method name="get_field" qualifiers="const">
+			<return type="Variant" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns the value of the field [param name]. Returns [code]null[/code] if the field does not exist on this component type.
+			</description>
+		</method>
+		<method name="get_fields" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns every field of this component as a [Dictionary] of name to value.
+			</description>
+		</method>
+		<method name="get_type_name" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns the name of the component type this accessor refers to.
+			</description>
+		</method>
+		<method name="is_valid" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the underlying entity is alive and still has this component.
+			</description>
+		</method>
+		<method name="set_field">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="value" type="Variant" />
+			<description>
+				Writes [param value] into the field [param name] and marks the row changed. No-op if the field does not exist or the entity is dead.
+			</description>
+		</method>
+	</methods>
+</class>

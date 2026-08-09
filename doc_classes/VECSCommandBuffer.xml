@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VECSCommandBuffer" inherits="RefCounted" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		A deferred queue for structural changes (add/remove component, destroy entity).
+	</brief_description>
+	<description>
+		[b]VECSCommandBuffer[/b] batches structural changes so they can be applied at a safe point. Multiple changes to the same entity collapse into a single archetype transition, and events are dispatched per net change (e.g. [code][add A, remove A][/code] nets to "no A").
+
+		Structural changes are forbidden inside [method VECSWorld.each] and C++ iterations; queue them here and call [method flush] once afterwards. All handles returned by [method VECSWorld.commands] share the same world-level buffer, so [method flush] applies everything queued by every handle.
+	</description>
+	<tutorials>
+		<link title="Quickstart">https://github.com/Vortaris/VortarisECS/blob/main/docs/quickstart.md</link>
+	</tutorials>
+	<methods>
+		<method name="add_component">
+			<return type="void" />
+			<param index="0" name="entity" type="VECSEntity" />
+			<param index="1" name="type_name" type="String" />
+			<param index="2" name="fields" type="Dictionary" default="{}" />
+			<description>
+				Queues adding the component [param type_name] (initialized from [param fields]) to [param entity] at the next [method flush].
+			</description>
+		</method>
+		<method name="add_entity">
+			<return type="void" />
+			<param index="0" name="entity" type="VECSEntity" />
+			<description>
+				Queues creating [param entity] at the next [method flush]. Pass a preassigned handle (e.g. from the network layer) whose id should exist by then.
+			</description>
+		</method>
+		<method name="flush">
+			<return type="void" />
+			<description>
+				Applies every queued operation now and clears the buffer. Safe to call from anywhere outside an iteration. Flushing inside an iteration is rejected.
+			</description>
+		</method>
+		<method name="remove_component">
+			<return type="void" />
+			<param index="0" name="entity" type="VECSEntity" />
+			<param index="1" name="type_name" type="String" />
+			<description>
+				Queues removing the component [param type_name] from [param entity] at the next [method flush].
+			</description>
+		</method>
+		<method name="remove_entity">
+			<return type="void" />
+			<param index="0" name="entity" type="VECSEntity" />
+			<description>
+				Queues destroying [param entity] at the next [method flush].
+			</description>
+		</method>
+		<method name="size" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of operations currently queued in the shared world buffer.
+			</description>
+		</method>
+	</methods>
+</class>

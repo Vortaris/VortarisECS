@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VECSWorld" inherits="Node" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		The main entry point of VortarisECS: a Node wrapping one ECS world. Registered as the [code]VECS[/code] engine singleton.
+	</brief_description>
+	<description>
+		[b]VECSWorld[/b] is a [Node] that owns a single entity-component-system world and exposes it to GDScript. It is registered as the [code]VECS[/code] engine singleton, so scripts can call [code]VECS.get_world()[/code] to reach it.
+
+		Use it to create and destroy entities, register script-defined components, run queries, iterate over component sets, flush deferred structural changes, and serialize/deserialize the world. Script-defined (schema-only) components registered here behave identically to C++ components compiled into the extension.
+
+		Entities are referenced through lightweight [VECSEntity] handles. Component values are read and written through [VECSComponent] accessors, or with the convenience [method get_field] / [method set_field] / [method spawn] / [method each] sugar.
+	</description>
+	<tutorials>
+		<link title="Quickstart">https://github.com/Vortaris/VortarisECS/blob/main/docs/quickstart.md</link>
+	</tutorials>
+	<methods>
+		<method name="add_observer">
+			<return type="void" />
+			<param index="0" name="observer" type="VECSObserver" />
+			<description>
+				Registers [param observer] with this world. The observer starts receiving component events (ADDED / REMOVED / CHANGED / MATCHED / UNMATCHED / custom) according to its [member VECSObserver.events] mask and component filter.
+			</description>
+		</method>
+		<method name="add_system">
+			<return type="void" />
+			<param index="0" name="system" type="VECSSystem" />
+			<description>
+				Registers [param system] for execution. The system joins its [member VECSSystem.group]; call [method process] with that group to tick it. On registration the system's [code]_setup[/code] hook runs so it can build cached views against this world.
+			</description>
+		</method>
+		<method name="commands">
+			<return type="VECSCommandBuffer" />
+			<description>
+				Returns the world's shared [VECSCommandBuffer]. Structural changes (add/remove component, destroy entity) issued inside an iteration must be deferred through this buffer and flushed once with [method VECSCommandBuffer.flush]. All handles returned by this method share the same underlying world-level buffer.
+			</description>
+		</method>
+		<method name="compact">
+			<return type="void" />
+			<description>
+				Frees archetypes that no longer hold any entity and reclaims their memory. Safe to call periodically (e.g. after scene transitions) if many component sets have emptied out.
+			</description>
+		</method>
+		<method name="create_entity">
+			<return type="VECSEntity" />
+			<description>
+				Creates a new entity with no components and returns a handle to it. Components can then be added with [method VECSEntity.add_component] or via the convenience [method spawn].
+			</description>
+		</method>
+		<method name="create_entity_preassigned">
+			<return type="VECSEntity" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Creates an entity with an explicit id (slot + generation packed into the 64-bit value). Used by snapshot loading and network replication so ids stay stable across worlds. Returns a null handle if the id is invalid or the slot is already occupied.
+			</description>
+		</method>
+		<method name="deserialize_snapshot">
+			<return type="bool" />
+			<param index="0" name="data" type="PackedByteArray" />
+			<description>
+				Loads a binary snapshot produced by [method serialize_snapshot] into this world. Loading replaces the existing world contents. Returns [code]true[/code] on success, [code]false[/code] on a version mismatch or malformed data.
+			</description>
+		</method>
+		<method name="deserialize_snapshot_json">
+			<return type="bool" />
+			<param index="0" name="data" type="Variant" />
+			<description>
+				Loads a JSON save produced by [method serialize_snapshot_json]. Accepts either an already-parsed [Dictionary] or a JSON [String]. Loading replaces the existing world contents; unknown components are skipped with a warning, entity ids are preserved. Returns [code]true[/code] only if every entity spawned.
+			</description>
+		</method>
+		<method name="destroy_entity">
+			<return type="void" />
+			<param index="0" name="entity" type="VECSEntity" />
+			<description>
+				Destroys [param entity] immediately (not deferred). Dispatching a REMOVED event for each of its components. No-op if the entity is already dead. To destroy inside an iteration, use [method VECSCommandBuffer.remove_entity] instead.
+			</description>
+		</method>
+		<method name="each">
+			<return type="void" />
+			<param index="0" name="components" type="Array" />
+			<param index="1" name="callable" type="Callable" />
+			<description>
+				Calls [param callable] once per entity that has every component named in [param components] (e.g. [code]["Position", "Velocity"][/code]). Unlike [method query].execute, no [Array] is materialized — suitable for iterating large populations. The callable receives the entity as a [VECSEntity]. Do not perform structural changes inside the callable.
+			</description>
+		</method>
+		<method name="emit_event">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="entity" type="VECSEntity" />
+			<param index="2" name="payload" type="Variant" default="null" />
+			<description>
+				Broadcasts a custom event to observers that subscribe to [code]name[/code]. [param payload] is passed through unchanged; [param entity] may be a null handle for events that do not concern a specific entity.
+			</description>
+		</method>
+		<method name="entities_to_data">
+			<return type="Array" />
+			<description>
+				Exports every entity as an [Array] of dictionaries of the form [code][{"id": int, "components": {"Name": {field: value}}}, ...][/code], in deterministic order (archetypes sorted by signature). Inverse of [method spawn_from_data]. Prefer the binary [method serialize_snapshot] for large worlds.
+			</description>
+		</method>
+		<method name="entity_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of live entities in the world.
+			</description>
+		</method>
+		<method name="get_component_type">
+			<return type="VECSComponentType" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns metadata for the component type registered as [param name], or a null handle if it is not registered. The returned [VECSComponentType] exposes field names, sizes and sync priorities.
+			</description>
+		</method>
+		<method name="get_field">
+			<return type="Variant" />
+			<param index="0" name="entity" type="VECSEntity" />
+			<param index="1" name="comp" type="String" />
+			<param index="2" name="field" type="String" />
+			<description>
+				Convenience sugar for [method VECSEntity.getf]: reads a single field of a component on [param entity]. Returns [code]null[/code] if the component or field does not exist.
+			</description>
+		</method>
+		<method name="get_world">
+			<return type="VECSWorld" />
+			<description>
+				Returns this node. Provided so systems and scripts can reach the world through a consistent accessor.
+			</description>
+		</method>
+		<method name="is_alive" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="entity" type="VECSEntity" />
+			<description>
+				Returns [code]true[/code] if [param entity] refers to a live entity in this world. Stale handles (from a destroyed or recycled entity) return [code]false[/code].
+			</description>
+		</method>
+		<method name="process">
+			<return type="void" />
+			<param index="0" name="delta" type="float" />
+			<param index="1" name="group" type="String" default="&quot;&quot;" />
+			<description>
+				Ticks every registered system in [param group] with [param delta] seconds. Call this once per frame (or at a fixed timestep) for each group of systems you run.
+			</description>
+		</method>
+		<method name="query">
+			<return type="VECSQueryBuilder" />
+			<description>
+				Returns a new fluent query builder. Chain [method VECSQueryBuilder.with_all], [method VECSQueryBuilder.with_any], [method VECSQueryBuilder.with_none], [method VECSQueryBuilder.changed] and [method VECSQueryBuilder.enabled], then terminate with [method VECSQueryBuilder.execute] / [method VECSQueryBuilder.execute_one] / [method VECSQueryBuilder.count].
+			</description>
+		</method>
+		<method name="register_component">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="fields" type="Array" />
+			<description>
+				Registers a script-defined (schema-only) component. [param fields] is an [Array] of dictionaries, each with a [code]name[/code] and a [code]type[/code] (one of [code]Bool[/code], [code]I8[/code]..[code]I64[/code], [code]U8[/code]..[code]U64[/code], [code]F32[/code]/[code]F64[/code], [code]Vector2[/code]..[code]Vector4[/code]([code]i[/code]), [code]Color[/code], [code]Quaternion[/code], [code]Basis[/code], [code]Transform2D[/code]/[code]3D[/code], [code]AABB[/code], [code]Rect2[/code], [code]Plane[/code], [code]StringFixed[/code], [code]Blob[/code]) and optional keys [code]count[/code], [code]sync_priority[/code] and [code]networked[/code]. Returns [code]false[/code] if a field is malformed or the name is already registered.
+			</description>
+		</method>
+		<method name="register_components">
+			<return type="bool" />
+			<param index="0" name="components" type="Dictionary" />
+			<description>
+				Batch-registers several schema components at once: [code]{"Name": [{name, type, ...}, ...], ...}[/code]. Convenient for loading data tables (e.g. cards, items).
+			</description>
+		</method>
+		<method name="remove_observer">
+			<return type="void" />
+			<param index="0" name="observer" type="VECSObserver" />
+			<description>
+				Unregisters [param observer] so it stops receiving events.
+			</description>
+		</method>
+		<method name="remove_system">
+			<return type="void" />
+			<param index="0" name="system" type="VECSSystem" />
+			<description>
+				Unregisters [param system] so it is no longer ticked.
+			</description>
+		</method>
+		<method name="serialize_snapshot" qualifiers="const">
+			<return type="PackedByteArray" />
+			<description>
+				Serializes the whole world to a deterministic binary snapshot (little-endian, fixed-width, byte-identical across runs). Load with [method deserialize_snapshot].
+			</description>
+		</method>
+		<method name="serialize_snapshot_json">
+			<return type="Dictionary" />
+			<description>
+				Serializes the whole world as a JSON-able [Dictionary]: [code]{"version": int, "entities": [...]}[/code]. Pass it to [method JSON.stringify] to write a save file.
+			</description>
+		</method>
+		<method name="set_entity_range">
+			<return type="void" />
+			<param index="0" name="base" type="int" />
+			<description>
+				Pre-reserves entity id slots up to [param base] so later ids stay within a range. Useful when combining network-assigned ids with locally-created ones. Out-of-range values are rejected.
+			</description>
+		</method>
+		<method name="set_field">
+			<return type="void" />
+			<param index="0" name="entity" type="VECSEntity" />
+			<param index="1" name="comp" type="String" />
+			<param index="2" name="field" type="String" />
+			<param index="3" name="value" type="Variant" />
+			<description>
+				Convenience sugar for [method VECSEntity.setf]: writes a single field of a component on [param entity] and marks it changed. No-op if the component or field does not exist.
+			</description>
+		</method>
+		<method name="spawn">
+			<return type="VECSEntity" />
+			<param index="0" name="components" type="Dictionary" />
+			<description>
+				Convenience sugar: creates an entity and adds every component in [param components] in one call, e.g. [code]spawn({"Position": {"x": 1.0}, "Velocity": {"x": 0.5}})[/code]. Returns a handle to the new entity, or a null handle if spawning failed.
+			</description>
+		</method>
+		<method name="spawn_from_data">
+			<return type="Array" />
+			<param index="0" name="entities" type="Array" />
+			<description>
+				Batch-creates entities from data: [code][{"id"?: int, "components": {"Name": {field: value}}}, ...][/code]. Entities that fail to spawn (e.g. an id conflict) are skipped. Returns the array of created [VECSEntity] handles.
+			</description>
+		</method>
+		<method name="system_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of registered systems.
+			</description>
+		</method>
+	</methods>
+</class>

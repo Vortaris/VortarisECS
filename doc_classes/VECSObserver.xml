@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VECSObserver" inherits="Node" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		A reactive, event-driven observer that reacts to component changes.
+	</brief_description>
+	<description>
+		[b]VECSObserver[/b] subscribes to ECS events (component ADDED / REMOVED / CHANGED, membership MATCHED / UNMATCHED, and custom events). When a matching event fires, the observer's callback runs — GDScript observers override [method _script_each], C++ observers override [code]_each[/code].
+
+		Subscribe to event kinds by calling the [code]on_*[/code] helpers (e.g. [method on_added]) or by setting [member events] as a bitmask. Filter by component type with [method set_components]; for MATCHED/UNMATCHED use [method set_match_components]. Register the observer with [method VECSWorld.add_observer].
+	</description>
+	<tutorials>
+		<link title="Quickstart">https://github.com/Vortaris/VortarisECS/blob/main/docs/quickstart.md</link>
+	</tutorials>
+	<methods>
+		<method name="_script_each" qualifiers="virtual">
+			<return type="void" />
+			<param index="0" name="event" type="int" />
+			<param index="1" name="entity" type="VECSEntity" />
+			<param index="2" name="payload" type="Variant" />
+			<description>
+				GDScript override point, called for every subscribed event. [param event] is one of the [enum Event] values, [param entity] is the affected entity, [param payload] carries event-specific data (custom payloads, or empty for component events).
+			</description>
+		</method>
+		<method name="get_components" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns the component filter set with [method set_components].
+			</description>
+		</method>
+		<method name="get_match_components" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns the membership query set with [method set_match_components].
+			</description>
+		</method>
+		<method name="get_world" qualifiers="const">
+			<return type="VECSWorld" />
+			<description>
+				Returns the [VECSWorld] this observer is attached to.
+			</description>
+		</method>
+		<method name="on_added">
+			<return type="void" />
+			<description>
+				Subscribes to ADDED events (a component was attached to an entity).
+			</description>
+		</method>
+		<method name="on_changed">
+			<return type="void" />
+			<description>
+				Subscribes to CHANGED events (a component value was written).
+			</description>
+		</method>
+		<method name="on_custom">
+			<return type="void" />
+			<description>
+				Subscribes to custom events broadcast with [method VECSWorld.emit_event]. Combine with [member custom_event_name] to filter by event name.
+			</description>
+		</method>
+		<method name="on_matched">
+			<return type="void" />
+			<description>
+				Subscribes to MATCHED events (an entity entered the membership query set with [method set_match_components]).
+			</description>
+		</method>
+		<method name="on_removed">
+			<return type="void" />
+			<description>
+				Subscribes to REMOVED events (a component was detached or an entity was destroyed).
+			</description>
+		</method>
+		<method name="on_unmatched">
+			<return type="void" />
+			<description>
+				Subscribes to UNMATCHED events (an entity left the membership query set).
+			</description>
+		</method>
+		<method name="set_components">
+			<return type="void" />
+			<param index="0" name="names" type="Array" />
+			<description>
+				Restricts the observer to events about the named components. Empty means "watch all components".
+			</description>
+		</method>
+		<method name="set_match_components">
+			<return type="void" />
+			<param index="0" name="names" type="Array" />
+			<description>
+				Sets the component-set query for MATCHED / UNMATCHED membership events. The observer tracks which entities match the set and reports transitions.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="custom_event_name" type="String" setter="set_custom_event_name" getter="get_custom_event_name">
+			When subscribing to custom events, only events with this name are delivered. Empty means all custom events.
+		</member>
+		<member name="events" type="int" setter="set_events" getter="get_events">
+			Bitmask of subscribed event kinds (the [enum Event] values as bits). Set it directly or use the [code]on_*[/code] helpers.
+		</member>
+		<member name="flush_mode" type="int" setter="set_flush_mode" getter="get_flush_mode">
+			[constant PER_CALLBACK] runs a callback right after each event; [constant MANUAL] defers the callback until the user triggers it.
+		</member>
+	</members>
+	<constants>
+		<constant name="ADDED" value="0" enum="Event">
+			A component was added to an entity.
+		</constant>
+		<constant name="REMOVED" value="1" enum="Event">
+			A component was removed from an entity, or the entity was destroyed.
+		</constant>
+		<constant name="CHANGED" value="2" enum="Event">
+			A component value was written.
+		</constant>
+		<constant name="MATCHED" value="3" enum="Event">
+			An entity started matching the membership query.
+		</constant>
+		<constant name="UNMATCHED" value="4" enum="Event">
+			An entity stopped matching the membership query.
+		</constant>
+		<constant name="CUSTOM" value="5" enum="Event">
+			A custom event was broadcast with [method VECSWorld.emit_event].
+		</constant>
+		<constant name="PER_CALLBACK" value="0" enum="FlushMode">
+			Deliver the callback immediately when the event fires.
+		</constant>
+		<constant name="MANUAL" value="1" enum="FlushMode">
+			Defer delivery until the user triggers it.
+		</constant>
+	</constants>
+</class>
