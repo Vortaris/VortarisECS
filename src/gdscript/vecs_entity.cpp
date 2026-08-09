@@ -87,6 +87,21 @@ void VECSEntity::remove_component(const godot::String &p_type_name) {
 	world_->remove_component(entity(), t);
 }
 
+godot::Variant VECSEntity::getf(const godot::String &p_comp, const godot::String &p_field) const {
+	godot::Ref<VECSComponent> comp = get_component(p_comp);
+	if (comp.is_valid()) {
+		return comp->get_field(p_field);
+	}
+	return godot::Variant();
+}
+
+void VECSEntity::setf(const godot::String &p_comp, const godot::String &p_field, const godot::Variant &p_value) {
+	godot::Ref<VECSComponent> comp = get_component(p_comp);
+	if (comp.is_valid()) {
+		comp->set_field(p_field, p_value);
+	}
+}
+
 bool VECSEntity::equals(const godot::Ref<VECSEntity> &p_other) const {
 	return p_other.is_valid() && id_ == p_other->id_;
 }
@@ -104,6 +119,8 @@ void VECSEntity::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_component", "type_name"), &VECSEntity::get_component);
 	ClassDB::bind_method(D_METHOD("add_component", "type_name", "fields"), &VECSEntity::add_component, DEFVAL(Dictionary()));
 	ClassDB::bind_method(D_METHOD("remove_component", "type_name"), &VECSEntity::remove_component);
+	ClassDB::bind_method(D_METHOD("getf", "comp", "field"), &VECSEntity::getf);
+	ClassDB::bind_method(D_METHOD("setf", "comp", "field", "value"), &VECSEntity::setf);
 	ClassDB::bind_method(D_METHOD("equals", "other"), &VECSEntity::equals);
 	ClassDB::bind_method(D_METHOD("hash_value"), &VECSEntity::hash_value);
 }

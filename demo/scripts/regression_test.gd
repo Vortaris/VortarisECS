@@ -16,6 +16,7 @@ extends SceneTree
 #   T9  distinct component sets stay distinct (archetype keying)
 #   T11 change tracking first pass reports pre-existing writes
 #   T12 schema-only layout matches the real Godot type sizes
+#   T14 convenience API (spawn / each / getf / setf)
 
 const EcsTestUtil := preload("res://scripts/ecs_test_util.gd")
 
@@ -33,6 +34,7 @@ func _initialize() -> void:
 	_test_t9_archetype_sets(t)
 	_test_t11_change_tracking_init(t)
 	_test_t12_schema_size(t)
+	_test_t14_convenience_api(t)
 	print("total=", t.total, " failures=", t.failures)
 	if t.failures == 0:
 		print("=== VortarisECS Regression OK ===")
@@ -340,4 +342,27 @@ func _test_t12_schema_size(t: RefCounted) -> void:
 	# float build: Vector3=12 (align 4), Transform3D=48 (Basis 36 + origin 12).
 	# The old hardcoded 64 for Transform3D was wrong; sizeof() gives 48.
 	t.expect_eq(int(ct.get_size()), 60, "T12: Vector3+Transform3D schema size")
+	w.free()
+
+
+# T14: convenience sugar — spawn(), each(), getf/setf, world-level field access.
+func _test_t14_convenience_api(t: RefCounted) -> void:
+	print("-- T14: convenience API --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("C14", [{"name": "x", "type": "F32"}, {"name": "y", "type": "F32"}])
+	w.register_component("C14b", [{"name": "v", "type": "F32"}])
+	var e: VECSEntity = w.spawn({"C14": {"x": 1.0, "y": 2.0}, "C14b": {"v": 0.5}})
+	t.expect(e != null, "T14: spawn returns an entity")
+	t.expect_eq(float(e.getf("C14", "x")), 1.0, "T14: getf reads a field")
+	e.setf("C14", "y", 9.0)
+	t.expect_eq(float(e.getf("C14", "y")), 9.0, "T14: setf writes a field")
+
+	var seen := []
+	w.each(["C14"], func(ent: VECSEntity) -> void:
+		seen.append(ent))  # GDScript lambdas capture primitives by value
+	t.expect_eq(seen.size(), 1, "T14: each visits the matching entity")
+
+	t.expect_eq(float(w.get_field(e, "C14", "x")), 1.0, "T14: world.get_field")
+	w.set_field(e, "C14", "x", 42.0)
+	t.expect_eq(float(e.getf("C14", "x")), 42.0, "T14: world.set_field")
 	w.free()

@@ -62,6 +62,25 @@ godot --headless --path demo --script res://scripts/perf_test.gd
 
 ## Quick start (GDScript)
 
+A short end-to-end walkthrough lives in [`docs/quickstart.md`](docs/quickstart.md)
+(and runs as `demo/scripts/quickstart.gd`). The **convenience API** gets simple
+things done in a few lines:
+
+```gdscript
+var world: VECSWorld = VECS.get_world()
+
+world.register_component("Pos", [{"name": "x", "type": "F32"}, {"name": "y", "type": "F32"}])
+world.register_component("Vel", [{"name": "x", "type": "F32"}])
+
+var e := world.spawn({"Pos": {"x": 1.0, "y": 2.0}, "Vel": {"x": 0.5}})   # one-call spawn
+
+world.each(["Pos", "Vel"], func(ent: VECSEntity) -> void:                 # iterate, no Array built
+    ent.setf("Pos", "x", ent.getf("Pos", "x") + ent.getf("Vel", "x")))
+```
+
+The full API offers the same things with explicit control — component
+accessors, the fluent query builder, command buffers, and typed C++ iteration:
+
 ```gdscript
 var world: VECSWorld = VECS.get_world()
 
@@ -171,6 +190,25 @@ component (e.g. `Falling`), and the system only queries entities carrying it.
 See `demo/scripts/falling_system.gd` + `sand_observer.gd` for the full sand
 falling example.
 
+## Iteration contract
+
+Never issue structural changes (add/remove a component, destroy an entity)
+**while iterating** — `for_each`, `View::each` and `VECSWorld::each` walk live
+archetype rows, and a structural change would move rows under the walker. Defer
+them to the command buffer (`world.commands()`) or do them outside the loop:
+
+```cpp
+w.for_each<Position>([&](vortaris::Entity e, Position &pos) {
+    // reading/writing component VALUES is fine ...
+});
+// ... but adding/removing components or destroying entities is not, inside the
+// loop. Defer: w.commands().add_component(...) then flush once.
+```
+
+The framework enforces this: a structural change issued during iteration is
+rejected with an error instead of silently corrupting the iteration (it used to
+cause random skips / stale reads).
+
 ## JSON saves & data tables
 
 Deeply integrated with Godot's own `JSON` class — pass in/out plain
@@ -224,10 +262,13 @@ Components are networked automatically: entities with at least one networked com
 
 | Operation | Time |
 |---|---|
-| `for_each<Position, Velocity>` (C++) | **0.37 ms** |
+| `for_each<Position, Velocity>` (C++) | **0.43 ms** |
 | Query count | 0.02 ms |
 | Create (via GDScript API) | 219 ms |
 | Snapshot serialize / deserialize | 13 / 39 ms |
+
+(Machine-measured baseline on this repo; prior numbers were 0.37 ms / 3.85 ms
+before the per-row `is_alive` lookup was removed from the iteration hot path.)
 
 ## Layout
 

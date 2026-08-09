@@ -118,6 +118,56 @@ godot::Ref<VECSCommandBuffer> VECSWorld::commands() {
 	return VECSCommandBuffer::make(core_.get());
 }
 
+godot::Ref<VECSEntity> VECSWorld::spawn(const godot::Dictionary &p_components) {
+	godot::Dictionary entry;
+	entry["components"] = p_components;
+	godot::Array list;
+	list.append(entry);
+	godot::Array spawned = spawn_from_data(list);
+	if (spawned.size() == 0) {
+		return godot::Ref<VECSEntity>();
+	}
+	return spawned[0];
+}
+
+void VECSWorld::each(const godot::Array &p_components, const godot::Callable &p_callable) {
+	std::vector<vortaris::ComponentTypeId> ids;
+	for (int i = 0; i < p_components.size(); ++i) {
+		vortaris::ComponentTypeId t = core_->registry().id_of(godot::StringName(godot::String(p_components[i])));
+		if (t != vortaris::INVALID_COMPONENT_TYPE) {
+			ids.push_back(t);
+		}
+	}
+	if (ids.empty()) {
+		ERR_PRINT("VortarisECS: each() needs at least one known component name.");
+		return;
+	}
+	vortaris::Query q;
+	q.all = std::move(ids);
+	std::sort(q.all.begin(), q.all.end());
+	const auto &arches = core_->query_cache().match(q, core_->all_archetypes());
+	core_->begin_iteration();
+	for (const vortaris::Archetype *a : arches) {
+		for (size_t row = 0; row < a->entities.size(); ++row) {
+			p_callable.call(VECSEntity::make(core_.get(), a->entities[row]));
+		}
+	}
+	core_->end_iteration();
+}
+
+godot::Variant VECSWorld::get_field(const godot::Ref<VECSEntity> &p_entity, const godot::String &p_comp, const godot::String &p_field) {
+	if (p_entity.is_valid()) {
+		return p_entity->getf(p_comp, p_field);
+	}
+	return godot::Variant();
+}
+
+void VECSWorld::set_field(const godot::Ref<VECSEntity> &p_entity, const godot::String &p_comp, const godot::String &p_field, const godot::Variant &p_value) {
+	if (p_entity.is_valid()) {
+		p_entity->setf(p_comp, p_field, p_value);
+	}
+}
+
 void VECSWorld::add_system(VECSSystem *p_system) {
 	if (!p_system) {
 		return;
@@ -339,6 +389,10 @@ void VECSWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_component_type", "name"), &VECSWorld::get_component_type);
 	ClassDB::bind_method(D_METHOD("query"), &VECSWorld::query);
 	ClassDB::bind_method(D_METHOD("commands"), &VECSWorld::commands);
+	ClassDB::bind_method(D_METHOD("spawn", "components"), &VECSWorld::spawn);
+	ClassDB::bind_method(D_METHOD("each", "components", "callable"), &VECSWorld::each);
+	ClassDB::bind_method(D_METHOD("get_field", "entity", "comp", "field"), &VECSWorld::get_field);
+	ClassDB::bind_method(D_METHOD("set_field", "entity", "comp", "field", "value"), &VECSWorld::set_field);
 	ClassDB::bind_method(D_METHOD("add_system", "system"), &VECSWorld::add_system);
 	ClassDB::bind_method(D_METHOD("remove_system", "system"), &VECSWorld::remove_system);
 	ClassDB::bind_method(D_METHOD("system_count"), &VECSWorld::system_count);

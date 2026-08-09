@@ -6,7 +6,9 @@
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/variant.hpp>
 
 #include "../core/world.h"
 
@@ -50,6 +52,17 @@ public:
 	// ---- query / commands ----
 	godot::Ref<VECSQueryBuilder> query();
 	godot::Ref<VECSCommandBuffer> commands();
+
+	// ---- convenience sugar (thin wrappers over the flexible APIs) ----
+	// Spawns one entity whose components are given as a Dictionary:
+	//   world.spawn({"Position": {"x": 0.0, "y": 0.0}, "Velocity": {"x": 1.0}})
+	godot::Ref<VECSEntity> spawn(const godot::Dictionary &p_components);
+	// Iterates every entity having all the given components, calling
+	// p_callable(ent) per entity WITHOUT materializing an Array.
+	void each(const godot::Array &p_components, const godot::Callable &p_callable);
+	// One-call field read/write: world.get_field(e, "Position", "x").
+	godot::Variant get_field(const godot::Ref<VECSEntity> &p_entity, const godot::String &p_comp, const godot::String &p_field);
+	void set_field(const godot::Ref<VECSEntity> &p_entity, const godot::String &p_comp, const godot::String &p_field, const godot::Variant &p_value);
 
 	// ---- systems ----
 	void add_system(VECSSystem *p_system);
