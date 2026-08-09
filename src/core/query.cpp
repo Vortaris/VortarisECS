@@ -59,7 +59,12 @@ const std::vector<Archetype *> &QueryCache::match(Query &p_q, const std::vector<
 	uint64_t key = p_q.membership_signature();
 	auto it = cache_.find(key);
 	if (it != cache_.end()) {
-		return it->second;
+		// Guard against a (vanishingly unlikely) signature collision: only reuse
+		// the cached archetype list when the cached query is exactly this one.
+		auto cit = cached_queries_.find(key);
+		if (cit != cached_queries_.end() && cit->second.all == p_q.all && cit->second.any == p_q.any && cit->second.none == p_q.none) {
+			return it->second;
+		}
 	}
 	std::vector<Archetype *> result;
 	result.reserve(p_archetypes.size());

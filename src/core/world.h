@@ -4,10 +4,13 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include <godot_cpp/core/error_macros.hpp>
 
 #include "archetype.h"
 #include "column.h"
@@ -73,6 +76,8 @@ public:
 	const T *get(Entity p_e) const;
 	template <class T>
 	T &add(Entity p_e, const T &p_value = {});
+	template <class T>
+	T *try_add(Entity p_e, const T &p_value = {}); // nullptr on dead entity / unknown type
 	template <class T>
 	void remove(Entity p_e);
 
@@ -166,7 +171,10 @@ private:
 	std::vector<uint32_t> slot_generations_;
 	std::vector<uint32_t> free_slots_;
 	std::unordered_map<Entity, EntityLocation> entity_locations_;
-	std::unordered_map<uint64_t, Archetype *> archetypes_;
+	// Keyed by the exact sorted component set (no hash), so two distinct sets can
+	// never collide and share columns. Archetype::signature (a hash) is kept only
+	// for stable serialization ordering.
+	std::map<std::vector<ComponentTypeId>, Archetype *> archetypes_;
 	std::vector<Archetype *> archetype_list_;
 	Archetype *empty_archetype_ = nullptr;
 	QueryCache query_cache_;
@@ -224,11 +232,27 @@ template <class T>
 T &World::add(Entity p_e, const T &p_value) {
 	ComponentTypeId t = type_id_of<T>();
 	if (!is_alive(p_e)) {
+		// The signature must return a T&, but a dead entity cannot be written;
+		// report loudly instead of silently discarding the caller's data.
 		static thread_local T dummy{};
+		ERR_PRINT("VortarisECS: World::add<T>() on a dead entity; the value was discarded.");
 		return dummy;
 	}
 	add_raw(p_e, t, &p_value);
 	return *static_cast<T *>(get_raw(p_e, t));
+}
+
+// Non-fatal variant of add<T>(): returns nullptr (instead of a dummy reference)
+// when the entity is dead or the component type is unregistered, so callers can
+// branch on failure instead of losing data silently.
+template <class T>
+T *World::try_add(Entity p_e, const T &p_value) {
+	ComponentTypeId t = type_id_of<T>();
+	if (t == INVALID_COMPONENT_TYPE || !is_alive(p_e)) {
+		return nullptr;
+	}
+	add_raw(p_e, t, &p_value);
+	return static_cast<T *>(get_raw(p_e, t));
 }
 
 template <class T>

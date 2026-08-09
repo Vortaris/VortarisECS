@@ -3,7 +3,21 @@
 #include <algorithm>
 
 #include <godot_cpp/core/error_macros.hpp>
+#include <godot_cpp/variant/aabb.hpp>
+#include <godot_cpp/variant/basis.hpp>
+#include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/plane.hpp>
+#include <godot_cpp/variant/quaternion.hpp>
+#include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/transform2d.hpp>
+#include <godot_cpp/variant/transform3d.hpp>
+#include <godot_cpp/variant/vector2.hpp>
+#include <godot_cpp/variant/vector2i.hpp>
+#include <godot_cpp/variant/vector3.hpp>
+#include <godot_cpp/variant/vector3i.hpp>
+#include <godot_cpp/variant/vector4.hpp>
+#include <godot_cpp/variant/vector4i.hpp>
 
 using namespace godot;
 
@@ -17,48 +31,36 @@ size_t align_up(size_t p_v, size_t p_a) {
 
 // Size in bytes of one scalar element of a field type (0 for StringFixed/Blob,
 // whose size is carried by `count`).
+//
+// Sizes/alignments come from the real Godot types so the computed layout stays
+// correct under precision=double builds too (a double build doubles real_t).
 size_t field_type_size(FieldType p_t) {
 	switch (p_t) {
-		case FieldType::Bool:
-		case FieldType::I8:
-		case FieldType::U8:
-			return 1;
-		case FieldType::I16:
-		case FieldType::U16:
-			return 2;
-		case FieldType::I32:
-		case FieldType::U32:
-		case FieldType::F32:
-			return 4;
-		case FieldType::I64:
-		case FieldType::U64:
-		case FieldType::F64:
-			return 8;
-		case FieldType::Vector2:
-		case FieldType::Vector2i:
-			return 8;
-		case FieldType::Vector3:
-		case FieldType::Vector3i:
-			return 12;
-		case FieldType::Vector4:
-		case FieldType::Vector4i:
-			return 16;
-		case FieldType::Color:
-			return 16;
-		case FieldType::Quaternion:
-			return 16;
-		case FieldType::Basis:
-			return 36;
-		case FieldType::Transform2D:
-			return 24;
-		case FieldType::Transform3D:
-			return 64;
-		case FieldType::AABB:
-			return 24;
-		case FieldType::Rect2:
-			return 16;
-		case FieldType::Plane:
-			return 16;
+		case FieldType::Bool: return sizeof(bool);
+		case FieldType::I8: return sizeof(int8_t);
+		case FieldType::U8: return sizeof(uint8_t);
+		case FieldType::I16: return sizeof(int16_t);
+		case FieldType::U16: return sizeof(uint16_t);
+		case FieldType::I32: return sizeof(int32_t);
+		case FieldType::U32: return sizeof(uint32_t);
+		case FieldType::F32: return sizeof(float);
+		case FieldType::I64: return sizeof(int64_t);
+		case FieldType::U64: return sizeof(uint64_t);
+		case FieldType::F64: return sizeof(double);
+		case FieldType::Vector2: return sizeof(godot::Vector2);
+		case FieldType::Vector2i: return sizeof(godot::Vector2i);
+		case FieldType::Vector3: return sizeof(godot::Vector3);
+		case FieldType::Vector3i: return sizeof(godot::Vector3i);
+		case FieldType::Vector4: return sizeof(godot::Vector4);
+		case FieldType::Vector4i: return sizeof(godot::Vector4i);
+		case FieldType::Color: return sizeof(godot::Color);
+		case FieldType::Quaternion: return sizeof(godot::Quaternion);
+		case FieldType::Basis: return sizeof(godot::Basis);
+		case FieldType::Transform2D: return sizeof(godot::Transform2D);
+		case FieldType::Transform3D: return sizeof(godot::Transform3D);
+		case FieldType::AABB: return sizeof(godot::AABB);
+		case FieldType::Rect2: return sizeof(godot::Rect2);
+		case FieldType::Plane: return sizeof(godot::Plane);
 		case FieldType::StringFixed:
 		case FieldType::Blob:
 			return 0;
@@ -68,23 +70,36 @@ size_t field_type_size(FieldType p_t) {
 
 size_t field_type_align(FieldType p_t) {
 	switch (p_t) {
-		case FieldType::Bool:
-		case FieldType::I8:
-		case FieldType::U8:
+		case FieldType::Bool: return alignof(bool);
+		case FieldType::I8: return alignof(int8_t);
+		case FieldType::U8: return alignof(uint8_t);
+		case FieldType::I16: return alignof(int16_t);
+		case FieldType::U16: return alignof(uint16_t);
+		case FieldType::I32: return alignof(int32_t);
+		case FieldType::U32: return alignof(uint32_t);
+		case FieldType::F32: return alignof(float);
+		case FieldType::I64: return alignof(int64_t);
+		case FieldType::U64: return alignof(uint64_t);
+		case FieldType::F64: return alignof(double);
+		case FieldType::Vector2: return alignof(godot::Vector2);
+		case FieldType::Vector2i: return alignof(godot::Vector2i);
+		case FieldType::Vector3: return alignof(godot::Vector3);
+		case FieldType::Vector3i: return alignof(godot::Vector3i);
+		case FieldType::Vector4: return alignof(godot::Vector4);
+		case FieldType::Vector4i: return alignof(godot::Vector4i);
+		case FieldType::Color: return alignof(godot::Color);
+		case FieldType::Quaternion: return alignof(godot::Quaternion);
+		case FieldType::Basis: return alignof(godot::Basis);
+		case FieldType::Transform2D: return alignof(godot::Transform2D);
+		case FieldType::Transform3D: return alignof(godot::Transform3D);
+		case FieldType::AABB: return alignof(godot::AABB);
+		case FieldType::Rect2: return alignof(godot::Rect2);
+		case FieldType::Plane: return alignof(godot::Plane);
+		case FieldType::StringFixed:
+		case FieldType::Blob:
 			return 1;
-		case FieldType::I16:
-		case FieldType::U16:
-			return 2;
-		case FieldType::I64:
-		case FieldType::U64:
-		case FieldType::F64:
-			return 8;
-		case FieldType::Vector4:
-		case FieldType::Vector4i:
-			return 16;
-		default:
-			return 4;
 	}
+	return alignof(float);
 }
 
 } // namespace

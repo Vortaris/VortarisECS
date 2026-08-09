@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include <godot_cpp/core/error_macros.hpp>
+
 #include "query.h"
 
 namespace vortaris {
@@ -19,11 +21,15 @@ size_t Archetype::column_index(ComponentTypeId p_t) const {
 }
 
 Column &Archetype::column(ComponentTypeId p_t) {
-	return columns[column_index(p_t)];
+	const size_t idx = column_index(p_t);
+	DEV_ASSERT(idx != SIZE_MAX); // callers must guard with has_component() first
+	return columns[idx];
 }
 
 const Column &Archetype::column(ComponentTypeId p_t) const {
-	return columns[column_index(p_t)];
+	const size_t idx = column_index(p_t);
+	DEV_ASSERT(idx != SIZE_MAX); // callers must guard with has_component() first
+	return columns[idx];
 }
 
 uint32_t Archetype::add_entity(Entity p_e, uint32_t p_change_tick) {

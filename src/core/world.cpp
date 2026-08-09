@@ -351,7 +351,7 @@ void World::compact() {
 	keep.reserve(archetype_list_.size());
 	for (Archetype *a : archetype_list_) {
 		if (a != empty_archetype_ && a->entities.empty()) {
-			archetypes_.erase(a->signature);
+			archetypes_.erase(a->component_ids);
 			query_cache_.erase_archetype(a);
 			delete a;
 		} else {
@@ -469,8 +469,7 @@ uint64_t World::_compute_signature(const std::vector<ComponentTypeId> &p_ids) co
 }
 
 Archetype *World::_ensure_archetype(const std::vector<ComponentTypeId> &p_ids) {
-	uint64_t sig = _compute_signature(p_ids);
-	auto it = archetypes_.find(sig);
+	auto it = archetypes_.find(p_ids);
 	if (it != archetypes_.end()) {
 		return it->second;
 	}
@@ -487,7 +486,7 @@ Archetype *World::_create_archetype(const std::vector<ComponentTypeId> &p_ids) {
 		col.init(s->size, s->alignment);
 		a->columns.push_back(std::move(col));
 	}
-	archetypes_[a->signature] = a;
+	archetypes_[a->component_ids] = a;
 	archetype_list_.push_back(a);
 	query_cache_.register_new_archetype(a);
 	return a;

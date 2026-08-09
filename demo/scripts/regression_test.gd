@@ -13,6 +13,9 @@ extends SceneTree
 #   T6  full_state is idempotent over an already-present entity id
 #   T7  oversized ids / ranges are rejected instead of corrupting memory
 #   T8  StringFixed truncation stays on a UTF-8 code-point boundary
+#   T9  distinct component sets stay distinct (archetype keying)
+#   T11 change tracking first pass reports pre-existing writes
+#   T12 schema-only layout matches the real Godot type sizes
 
 const EcsTestUtil := preload("res://scripts/ecs_test_util.gd")
 
@@ -27,6 +30,9 @@ func _initialize() -> void:
 	_test_t6_full_state_idempotent(t)
 	_test_t7_input_validation(t)
 	_test_t8_utf8_boundary(t)
+	_test_t9_archetype_sets(t)
+	_test_t11_change_tracking_init(t)
+	_test_t12_schema_size(t)
 	print("total=", t.total, " failures=", t.failures)
 	if t.failures == 0:
 		print("=== VortarisECS Regression OK ===")
@@ -280,4 +286,58 @@ func _test_t8_utf8_boundary(t: RefCounted) -> void:
 	var e2: VECSEntity = w.create_entity()
 	e2.add_component("Str", {"s": "中文"})  # 6 bytes, fits exactly
 	t.expect_eq(String(e2.get_component("Str").get_field("s")), "中文", "T8: exact fit round-trips")
+	w.free()
+
+
+# T9: distinct component sets must live in distinct archetypes.
+func _test_t9_archetype_sets(t: RefCounted) -> void:
+	print("-- T9: distinct component sets stay distinct --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T9A", [{"name": "v", "type": "I32"}])
+	w.register_component("T9B", [{"name": "v", "type": "I32"}])
+	w.register_component("T9C", [{"name": "v", "type": "I32"}])
+	w.register_component("T9D", [{"name": "v", "type": "I32"}])
+	var combos := [
+		["T9A"],
+		["T9A", "T9B"],
+		["T9B"],
+		["T9A", "T9B", "T9C"],
+		["T9D"],
+	]
+	for comps in combos:
+		var e: VECSEntity = w.create_entity()
+		for cname in comps:
+			e.add_component(cname, {"v": 1})
+	t.expect_eq(w.query().with_all(["T9A", "T9B"]).execute().size(), 2, "T9: A+B matches exactly 2")
+	t.expect_eq(w.query().with_all(["T9A", "T9B", "T9C"]).execute().size(), 1, "T9: A+B+C matches exactly 1")
+	t.expect_eq(w.query().with_all(["T9D"]).execute().size(), 1, "T9: D matches exactly 1")
+	t.expect_eq(w.query().with_all(["T9A"]).execute().size(), 3, "T9: A present in 3")
+	w.free()
+
+
+# T11: change tracking enabled after writes must report those rows once.
+func _test_t11_change_tracking_init(t: RefCounted) -> void:
+	print("-- T11: change tracking first pass reports pre-existing writes --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T11", [{"name": "v", "type": "F32"}])
+	var e: VECSEntity = w.create_entity()
+	e.add_component("T11", {"v": 1.0})  # write before any changed() query
+	var q1: VECSQueryBuilder = w.query().with_all(["T11"]).changed(["T11"])
+	var r1: Array = q1.execute()
+	t.expect(r1.size() >= 1, "T11: first pass reports pre-enabled writes")
+	var q2: VECSQueryBuilder = w.query().with_all(["T11"]).changed(["T11"])
+	var r2: Array = q2.execute()
+	t.expect_eq(r2.size(), 0, "T11: second pass with no writes is empty")
+	w.free()
+
+
+# T12: schema-only layout must match the real Godot type sizes (float build).
+func _test_t12_schema_size(t: RefCounted) -> void:
+	print("-- T12: schema layout matches real Godot types --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("Vec3", [{"name": "p", "type": "Vector3"}, {"name": "t", "type": "Transform3D"}])
+	var ct: VECSComponentType = w.get_component_type("Vec3")
+	# float build: Vector3=12 (align 4), Transform3D=48 (Basis 36 + origin 12).
+	# The old hardcoded 64 for Transform3D was wrong; sizeof() gives 48.
+	t.expect_eq(int(ct.get_size()), 60, "T12: Vector3+Transform3D schema size")
 	w.free()
