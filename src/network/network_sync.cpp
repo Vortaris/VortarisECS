@@ -375,7 +375,13 @@ void VECSSnapshotReplication::apply_full_state(VECSNetworkSync &p_ns, const vort
 		if (!in.read_u64(id)) {
 			return;
 		}
-		vortaris::Entity e = w.create_entity_preassigned(id);
+		vortaris::Entity e{ id };
+		if (w.is_alive(e)) {
+			// Reconcile: the server snapshot is authoritative, so rebuild the
+			// entity instead of aborting on an id conflict.
+			w.destroy_entity(e);
+		}
+		e = w.create_entity_preassigned(id);
 		if (!e) {
 			return;
 		}

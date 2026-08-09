@@ -39,6 +39,9 @@ void serialize_world_snapshot(const World &p_world, BinaryBuffer &r_out) {
 bool deserialize_world_snapshot(World &p_world, BinaryBuffer &r_in) {
 	const ComponentRegistry &registry = ComponentRegistry::instance();
 
+	// Loading a snapshot replaces the whole world.
+	p_world.clear();
+
 	uint16_t version;
 	if (!r_in.read_u16(version) || version != SNAPSHOT_VERSION) {
 		return false;

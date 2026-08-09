@@ -275,7 +275,19 @@ bool field_from_variant(const FieldDescriptor &p_fd, void *p_dst, const godot::V
 		size_t max_len = p_fd.count > 0 ? p_fd.count - 1 : 0; // keep room for NUL
 		godot::CharString utf8 = s.utf8();
 		size_t copy = std::min<size_t>(static_cast<size_t>(utf8.length()), max_len);
-		std::memcpy(p_dst, utf8.ptr(), copy);
+		// Never cut a multi-byte UTF-8 code point in half. If the byte just past
+		// the truncation point is a continuation byte, the code point straddling
+		// the boundary is incomplete: back off to its lead byte so the stored
+		// string is always valid UTF-8.
+		const uint8_t *src = reinterpret_cast<const uint8_t *>(utf8.ptr());
+		if (copy < static_cast<size_t>(utf8.length()) && copy > 0 && (src[copy] & 0xC0) == 0x80) {
+			size_t p = copy;
+			while (p > 0 && (src[p] & 0xC0) == 0x80) {
+				--p;
+			}
+			copy = p;
+		}
+		std::memcpy(p_dst, src, copy);
 		static_cast<char *>(p_dst)[copy] = '\0';
 		return true;
 	}

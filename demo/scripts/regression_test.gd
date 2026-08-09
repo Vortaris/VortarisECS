@@ -9,6 +9,10 @@ extends SceneTree
 #   T2  deferred [add, remove] on the same component must net correctly
 #   T3  execute_one() must honour the changed() filter
 #   T4  changed() baselines must not bleed between queries with different filters
+#   T5  deserialize replaces the existing world (JSON + binary)
+#   T6  full_state is idempotent over an already-present entity id
+#   T7  oversized ids / ranges are rejected instead of corrupting memory
+#   T8  StringFixed truncation stays on a UTF-8 code-point boundary
 
 const EcsTestUtil := preload("res://scripts/ecs_test_util.gd")
 
@@ -19,6 +23,10 @@ func _initialize() -> void:
 	_test_t2_deferred_add_remove(t)
 	_test_t3_execute_one_changed(t)
 	_test_t4_changed_baseline_independent(t)
+	_test_t5_deserialize_replaces(t)
+	_test_t6_full_state_idempotent(t)
+	_test_t7_input_validation(t)
+	_test_t8_utf8_boundary(t)
 	print("total=", t.total, " failures=", t.failures)
 	if t.failures == 0:
 		print("=== VortarisECS Regression OK ===")
@@ -178,4 +186,98 @@ func _test_t4_changed_baseline_independent(t: RefCounted) -> void:
 	var r3: Array = q1b.execute()
 	t.expect(r3.size() >= 1, "T4: Q1 still sees the earlier P change")
 
+	w.free()
+
+
+# T5: loading a save must replace the world, not stack on top of it.
+func _test_t5_deserialize_replaces(t: RefCounted) -> void:
+	print("-- T5: deserialize replaces existing entities --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("C5", [{"name": "v", "type": "I32"}])
+	for i in 3:
+		var e: VECSEntity = w.create_entity()
+		e.add_component("C5", {"v": i})
+	var save: Dictionary = w.serialize_snapshot_json()
+
+	var fresh: VECSWorld = VECSWorld.new()
+	for i in 5:
+		var e: VECSEntity = fresh.create_entity()
+		e.add_component("C5", {"v": 100 + i})
+	t.expect_eq(fresh.entity_count(), 5, "T5: pre-load entity count")
+	var ok: bool = fresh.deserialize_snapshot_json(save)
+	t.expect_eq(ok, true, "T5: JSON load ok")
+	t.expect_eq(fresh.entity_count(), 3, "T5: JSON load replaced the world")
+
+	var fresh2: VECSWorld = VECSWorld.new()
+	var stray: VECSEntity = fresh2.create_entity()
+	stray.add_component("C5", {"v": 999})
+	var bytes: PackedByteArray = w.serialize_snapshot()
+	t.expect_eq(fresh2.deserialize_snapshot(bytes), true, "T5: binary load ok")
+	t.expect_eq(fresh2.entity_count(), 3, "T5: binary load replaced the world")
+
+	w.free()
+	fresh.free()
+	fresh2.free()
+
+
+# T6: full_state applied over an already-present id must overwrite, not abort.
+func _test_t6_full_state_idempotent(t: RefCounted) -> void:
+	print("-- T6: full_state idempotent overwrite --")
+	var sw: VECSWorld = VECSWorld.new()
+	sw.register_component("NetF", [{"name": "v", "type": "F32"}])
+	var cw: VECSWorld = VECSWorld.new()
+	var s_ns: VECSNetworkSync = VECSNetworkSync.new()
+	var c_ns: VECSNetworkSync = VECSNetworkSync.new()
+	s_ns.set_server(true)
+	s_ns.bind_world(sw)
+	c_ns.bind_world(cw)
+	s_ns.set_direct_peer(c_ns)
+
+	var se: VECSEntity = sw.create_entity()
+	se.add_component("NetF", {"v": 10.0})
+	s_ns.tick(0.016)  # spawn -> client has the entity with v=10
+
+	var cq: Array = cw.query().with_all(["NetF"]).execute()
+	t.expect_eq(cq.size(), 1, "T6: client got the spawn")
+	var ce: VECSEntity = cq[0]
+	ce.get_component("NetF").set_field("v", 42.0)  # local divergence
+
+	se.get_component("NetF").set_field("v", 20.0)  # server authoritative value
+	s_ns.request_full_state()
+	t.expect_eq(float(ce.get_component("NetF").get_field("v")), 20.0, "T6: full_state overwrote client value")
+
+	s_ns.free()
+	c_ns.free()
+	cw.free()
+	sw.free()
+
+
+# T7: oversized preassigned ids and ranges are rejected without corrupting memory.
+func _test_t7_input_validation(t: RefCounted) -> void:
+	print("-- T7: input validation --")
+	var w: VECSWorld = VECSWorld.new()
+	w.set_entity_range(-1)        # rejected (ERR_PRINT), must not crash
+	w.set_entity_range(1 << 30)   # rejected, must not allocate 1B slots
+	var bad: VECSEntity = w.create_entity_preassigned((1 << 24) + 1)  # slot past the cap
+	t.expect_eq(bad, null, "T7: oversized preassigned id rejected")
+	var e: VECSEntity = w.create_entity()
+	t.expect(e.is_alive(), "T7: normal create still works")
+	w.free()
+
+
+# T8: StringFixed truncation must stay on a UTF-8 code-point boundary.
+func _test_t8_utf8_boundary(t: RefCounted) -> void:
+	print("-- T8: StringFixed UTF-8 boundary --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("Str", [{"name": "s", "type": "StringFixed", "count": 8}])
+	var e: VECSEntity = w.create_entity()
+	# "中中中" = 9 bytes, truncated to 7 content bytes. A naive cut lands inside
+	# the third "中"; the fix backs off so only two full characters are stored.
+	e.add_component("Str", {"s": "中中中"})
+	var s: String = e.get_component("Str").get_field("s")
+	t.expect_eq(s.length(), 2, "T8: truncated string has 2 full chars (got %d)" % s.length())
+
+	var e2: VECSEntity = w.create_entity()
+	e2.add_component("Str", {"s": "中文"})  # 6 bytes, fits exactly
+	t.expect_eq(String(e2.get_component("Str").get_field("s")), "中文", "T8: exact fit round-trips")
 	w.free()

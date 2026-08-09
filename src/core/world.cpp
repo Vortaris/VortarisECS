@@ -40,6 +40,12 @@ Entity World::create_entity_preassigned(uint64_t p_id) {
 	if (slot == 0xFFFFFFFFu) {
 		return Entity{};
 	}
+	// Guard against runaway ids: slot_generations_ is grown to `slot`, so an
+	// arbitrarily large id would allocate a huge generation array.
+	constexpr uint32_t k_max_slot = (1u << 24); // 16M slots is ample for any world
+	if (slot >= k_max_slot) {
+		return Entity{};
+	}
 	if (slot >= slot_generations_.size()) {
 		slot_generations_.resize(static_cast<size_t>(slot) + 1, 0);
 	}
@@ -327,6 +333,35 @@ void World::compact() {
 			++i;
 		}
 	}
+}
+
+void World::clear() {
+	// Snapshot load replaces the world. Destroy every entity without dispatching
+	// Removed events (loading a save is not "death"); keep archetypes for reuse
+	// and the id space (preassigned ids overwrite generations on load).
+	std::vector<Entity> all;
+	all.reserve(entity_locations_.size());
+	for (const auto &kv : entity_locations_) {
+		all.push_back(kv.first);
+	}
+	for (Entity e : all) {
+		auto it = entity_locations_.find(e);
+		if (it == entity_locations_.end()) {
+			continue;
+		}
+		uint32_t removed_row = it->second.row;
+		Archetype *a = it->second.archetype;
+		Entity moved = a->remove_entity(e);
+		entity_locations_.erase(it);
+		if (moved) {
+			auto mit = entity_locations_.find(moved);
+			if (mit != entity_locations_.end()) {
+				mit->second.row = removed_row;
+			}
+		}
+		_free_entity_id(e);
+	}
+	_invalidate_cache();
 }
 
 uint32_t World::changed_baseline(uint64_t p_query_signature, bool *r_existed) {

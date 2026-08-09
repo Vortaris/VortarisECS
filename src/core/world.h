@@ -125,6 +125,11 @@ public:
 
 	// ---- archetype lifecycle ----
 	void compact();
+	// Destroys every entity without dispatching observer events. Used when a
+	// snapshot/save load replaces the whole world — loading is not "death", so
+	// observers (including network sync) are not told about the removed
+	// entities. Archetypes and the id space are kept for reuse.
+	void clear();
 
 	// ---- caches ----
 	uint32_t cache_version() const { return cache_version_; }

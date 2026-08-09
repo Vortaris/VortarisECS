@@ -30,8 +30,13 @@ godot::Ref<VECSEntity> VECSWorld::create_entity() {
 }
 
 godot::Ref<VECSEntity> VECSWorld::create_entity_preassigned(int64_t p_id) {
+	if (p_id <= 0) {
+		ERR_PRINT("VortarisECS: create_entity_preassigned requires a positive id.");
+		return godot::Ref<VECSEntity>();
+	}
 	vortaris::Entity e = core_->create_entity_preassigned(static_cast<uint64_t>(p_id));
 	if (!e) {
+		ERR_PRINT("VortarisECS: create_entity_preassigned rejected id (slot out of range or already occupied).");
 		return godot::Ref<VECSEntity>();
 	}
 	return VECSEntity::make(core_.get(), e);
@@ -55,6 +60,13 @@ int64_t VECSWorld::entity_count() const {
 }
 
 void VECSWorld::set_entity_range(int64_t p_base) {
+	// The core reserves slot_generations_ up to this many slots; anything huge
+	// would allocate a large generation array for no reason.
+	constexpr int64_t k_max_base = (int64_t(1) << 24);
+	if (p_base < 0 || p_base > k_max_base) {
+		ERR_PRINT("VortarisECS: set_entity_range out of range (0 .. " + godot::String::num_int64(k_max_base) + ").");
+		return;
+	}
 	core_->set_entity_range(static_cast<uint32_t>(p_base));
 }
 
@@ -305,6 +317,8 @@ bool VECSWorld::deserialize_snapshot_json(const godot::Variant &p_data) {
 		return false;
 	}
 	const godot::Array ents = root["entities"];
+	// Loading a save replaces the world: drop any existing entities first.
+	core_->clear();
 	const godot::Array spawned = spawn_from_data(ents);
 	if (spawned.size() != ents.size()) {
 		ERR_PRINT("VortarisECS: some entities failed to deserialize.");
