@@ -7,9 +7,11 @@
 namespace vortaris {
 
 uint64_t Query::membership_signature() const {
+	// Callers (for_each, View/ChangeView, the query builder) sort all/any/none
+	// before building the query, so no sort is needed here — hashing an already
+	// sorted term set is what keeps repeated signatures equal.
 	uint64_t h = 14695981039346656037ull;
-	auto mix = [&h](std::vector<ComponentTypeId> ids, uint8_t p_tag) {
-		std::sort(ids.begin(), ids.end());
+	auto mix = [&h](const std::vector<ComponentTypeId> &ids, uint8_t p_tag) {
 		h ^= p_tag;
 		h *= 1099511628211ull;
 		for (ComponentTypeId id : ids) {

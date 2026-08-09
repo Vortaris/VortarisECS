@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <vector>
 
 #include <godot_cpp/variant/string.hpp>
@@ -48,10 +49,13 @@ public:
 	ObserverId add(ObserverCallback p_cb);
 	void remove(ObserverId p_id);
 	void dispatch(ObserverEventType p_type, Entity p_e, ComponentTypeId p_comp, const godot::String &p_event_name, const godot::Variant &p_payload);
-	bool is_empty() const { return callbacks_.empty(); }
+	bool is_empty() const { return !callbacks_ || callbacks_->empty(); }
 
 private:
-	std::vector<ObserverCallback> callbacks_;
+	// COW snapshot: dispatch() copies only the (atomic) shared_ptr, never the
+	// callback vector, so the hot path stays allocation-free and observers may
+	// register/unregister during delivery (re-entrancy safe).
+	std::shared_ptr<const std::vector<ObserverCallback>> callbacks_;
 	int next_id_ = 1;
 };
 

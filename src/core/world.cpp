@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include <godot_cpp/core/error_macros.hpp>
+
 #include "../serialization/snapshot.h"
 
 namespace vortaris {
@@ -65,6 +67,10 @@ void World::destroy_entity(Entity p_e) {
 	if (it == entity_locations_.end()) {
 		return;
 	}
+	if (in_iteration()) {
+		ERR_PRINT("VortarisECS: destroy_entity() during for_each/view iteration is unsafe; defer it via commands().");
+		return;
+	}
 	Archetype *a = it->second.archetype;
 	// Collect component types before removal; dispatch after, so observers that
 	// inspect the entity's remaining components see the final (empty) state.
@@ -113,18 +119,24 @@ uint32_t World::entity_count() const {
 // ------------------------------------------------------------ components --
 
 bool World::has(Entity p_e, ComponentTypeId p_t) const {
-	if (!is_alive(p_e)) {
+	if (!p_e) {
 		return false;
 	}
 	auto it = entity_locations_.find(p_e);
+	if (it == entity_locations_.end()) {
+		return false;
+	}
 	return it->second.archetype->has_component(p_t);
 }
 
 void *World::get_raw(Entity p_e, ComponentTypeId p_t) {
-	if (!is_alive(p_e)) {
+	if (!p_e) {
 		return nullptr;
 	}
 	auto it = entity_locations_.find(p_e);
+	if (it == entity_locations_.end()) {
+		return nullptr;
+	}
 	Archetype *a = it->second.archetype;
 	if (!a->has_component(p_t)) {
 		return nullptr;
@@ -133,10 +145,13 @@ void *World::get_raw(Entity p_e, ComponentTypeId p_t) {
 }
 
 const void *World::get_raw(Entity p_e, ComponentTypeId p_t) const {
-	if (!is_alive(p_e)) {
+	if (!p_e) {
 		return nullptr;
 	}
 	auto it = entity_locations_.find(p_e);
+	if (it == entity_locations_.end()) {
+		return nullptr;
+	}
 	const Archetype *a = it->second.archetype;
 	if (!a->has_component(p_t)) {
 		return nullptr;
@@ -181,6 +196,10 @@ void World::add_raw(Entity p_e, ComponentTypeId p_t, const void *p_data) {
 		return;
 	}
 
+	if (in_iteration()) {
+		ERR_PRINT("VortarisECS: add_component() during for_each/view iteration is unsafe; defer it via commands().");
+		return;
+	}
 	std::vector<ComponentTypeId> new_ids = cur->component_ids;
 	new_ids.push_back(p_t);
 	std::sort(new_ids.begin(), new_ids.end());
@@ -215,6 +234,10 @@ void World::remove_component(Entity p_e, ComponentTypeId p_t) {
 	auto it = entity_locations_.find(p_e);
 	Archetype *cur = it->second.archetype;
 	if (!cur->has_component(p_t)) {
+		return;
+	}
+	if (in_iteration()) {
+		ERR_PRINT("VortarisECS: remove_component() during for_each/view iteration is unsafe; defer it via commands().");
 		return;
 	}
 	std::vector<ComponentTypeId> new_ids = cur->component_ids;
@@ -322,17 +345,20 @@ void World::end_deferred_moves() {
 }
 
 void World::compact() {
-	for (size_t i = 0; i < archetype_list_.size();) {
-		Archetype *a = archetype_list_[i];
+	// Free empty archetypes and rebuild the list in one pass; erasing from the
+	// middle of a vector one element at a time is O(n^2).
+	std::vector<Archetype *> keep;
+	keep.reserve(archetype_list_.size());
+	for (Archetype *a : archetype_list_) {
 		if (a != empty_archetype_ && a->entities.empty()) {
 			archetypes_.erase(a->signature);
 			query_cache_.erase_archetype(a);
-			archetype_list_.erase(archetype_list_.begin() + static_cast<std::ptrdiff_t>(i));
 			delete a;
 		} else {
-			++i;
+			keep.push_back(a);
 		}
 	}
+	archetype_list_.swap(keep);
 }
 
 void World::clear() {
@@ -566,12 +592,23 @@ void World::_commit_deferred_move(Entity p_e) {
 
 uint32_t World::_move_entity_to(Entity p_e, Archetype *p_from, Archetype *p_to, uint32_t p_from_row) {
 	uint32_t new_row = p_to->add_entity(p_e, change_tick_);
-	for (size_t i = 0; i < p_from->component_ids.size(); ++i) {
-		ComponentTypeId tid = p_from->component_ids[i];
-		size_t idx = p_to->column_index(tid);
-		if (idx != SIZE_MAX) {
-			const ComponentSchema *s = registry().schema_of(tid);
-			std::memcpy(p_to->columns[idx].row(new_row), p_from->columns[i].row(p_from_row), s->size);
+	// Both component id lists are sorted ascending, so merge-walk them: shared
+	// components are copied in one linear pass (O(src + dst)) instead of a
+	// binary search per type (O(src * log dst)).
+	const auto &src_ids = p_from->component_ids;
+	const auto &dst_ids = p_to->component_ids;
+	size_t i = 0;
+	size_t j = 0;
+	while (i < src_ids.size() && j < dst_ids.size()) {
+		if (src_ids[i] < dst_ids[j]) {
+			++i;
+		} else if (dst_ids[j] < src_ids[i]) {
+			++j;
+		} else {
+			const ComponentSchema *s = registry().schema_of(src_ids[i]);
+			std::memcpy(p_to->columns[j].row(new_row), p_from->columns[i].row(p_from_row), s->size);
+			++i;
+			++j;
 		}
 	}
 	Entity moved = p_from->remove_entity(p_e);

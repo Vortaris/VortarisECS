@@ -131,6 +131,15 @@ public:
 	// entities. Archetypes and the id space are kept for reuse.
 	void clear();
 
+	// ---- iteration guards ----
+	// Structural changes (add/remove component, destroy entity) inside a
+	// for_each / view iteration would corrupt the archetype rows being walked;
+	// the guards below turn that silent corruption into a loud error. Defer
+	// structural changes to the command buffer instead.
+	void begin_iteration() { ++iteration_depth_; }
+	void end_iteration() { --iteration_depth_; }
+	bool in_iteration() const { return iteration_depth_ > 0; }
+
 	// ---- caches ----
 	uint32_t cache_version() const { return cache_version_; }
 	QueryCache &query_cache() { return query_cache_; }
@@ -166,6 +175,7 @@ private:
 	uint32_t cache_version_ = 0;
 
 	int suppress_depth_ = 0;
+	int iteration_depth_ = 0;
 	bool pending_cache_invalidation_ = false;
 	bool defer_moves_ = false;
 	std::vector<Entity> deferred_entities_;
@@ -231,41 +241,50 @@ void World::remove(Entity p_e) {
 
 template <class... Comps, class F>
 void World::for_each(F &&p_fn) {
-	std::array<ComponentTypeId, sizeof...(Comps)> ids = { type_id_of<Comps>()... };
+	// The type set is fixed at compile time, so the sorted id list is constant:
+	// cache it instead of rebuilding and re-sorting on every call.
+	static const std::array<ComponentTypeId, sizeof...(Comps)> s_ids = [] {
+		std::array<ComponentTypeId, sizeof...(Comps)> arr = { type_id_of<Comps>()... };
+		std::sort(arr.begin(), arr.end());
+		return arr;
+	}();
 	Query q;
-	q.all.assign(ids.begin(), ids.end());
-	std::sort(q.all.begin(), q.all.end());
+	q.all.assign(s_ids.begin(), s_ids.end());
 	const auto &arches = query_cache_.match(q, archetype_list_);
+	begin_iteration();
 	for (Archetype *a : arches) {
+		// Rows are always live: remove_entity swap-removes eagerly, so there are
+		// no stale rows to skip. Structural changes mid-iteration are rejected
+		// by the iteration guard (use the command buffer to defer them).
 		for (size_t row = 0; row < a->entities.size(); ++row) {
-			if (!is_alive(a->entities[row])) {
-				continue; // defensive: skip stale rows from edge-case structural churn
-			}
-			detail::for_each_row<Comps...>(p_fn, a, row, ids,
+			detail::for_each_row<Comps...>(p_fn, a, row, s_ids,
 					std::make_index_sequence<sizeof...(Comps)>{});
 		}
 	}
+	end_iteration();
 }
 
 template <class... Comps, class F>
 void World::for_each_enabled(F &&p_fn) {
-	std::array<ComponentTypeId, sizeof...(Comps)> ids = { type_id_of<Comps>()... };
+	static const std::array<ComponentTypeId, sizeof...(Comps)> s_ids = [] {
+		std::array<ComponentTypeId, sizeof...(Comps)> arr = { type_id_of<Comps>()... };
+		std::sort(arr.begin(), arr.end());
+		return arr;
+	}();
 	Query q;
-	q.all.assign(ids.begin(), ids.end());
-	std::sort(q.all.begin(), q.all.end());
+	q.all.assign(s_ids.begin(), s_ids.end());
 	const auto &arches = query_cache_.match(q, archetype_list_);
+	begin_iteration();
 	for (Archetype *a : arches) {
 		for (size_t row = 0; row < a->entities.size(); ++row) {
 			if (!a->get_enabled(row)) {
 				continue;
 			}
-			if (!is_alive(a->entities[row])) {
-				continue; // defensive: skip stale rows from edge-case structural churn
-			}
-			detail::for_each_row<Comps...>(p_fn, a, row, ids,
+			detail::for_each_row<Comps...>(p_fn, a, row, s_ids,
 					std::make_index_sequence<sizeof...(Comps)>{});
 		}
 	}
+	end_iteration();
 }
 
 // Cached, reusable view over every entity matching Comps... The query is
@@ -295,15 +314,14 @@ public:
 			return;
 		}
 		const auto &arches = world_->query_cache().match(query_, world_->all_archetypes());
+		world_->begin_iteration();
 		for (Archetype *a : arches) {
 			for (size_t row = 0; row < a->entities.size(); ++row) {
-				if (!world_->is_alive(a->entities[row])) {
-					continue; // defensive: skip stale rows from edge-case churn
-				}
 				detail::for_each_row<Comps...>(p_fn, a, row, ids_,
 						std::make_index_sequence<sizeof...(Comps)>{});
 			}
 		}
+		world_->end_iteration();
 	}
 
 	size_t count() const {

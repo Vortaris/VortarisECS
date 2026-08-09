@@ -26,24 +26,36 @@ uint32_t event_bit(ObserverEventType p_type) {
 
 ObserverId ObserverDispatch::add(ObserverCallback p_cb) {
 	p_cb.id = next_id_++;
-	callbacks_.push_back(std::move(p_cb));
+	// COW: snapshot, mutate a copy, publish a fresh immutable vector.
+	std::vector<ObserverCallback> copy = callbacks_ ? *callbacks_ : std::vector<ObserverCallback>();
+	copy.push_back(std::move(p_cb));
+	callbacks_ = std::make_shared<const std::vector<ObserverCallback>>(std::move(copy));
 	return p_cb.id;
 }
 
 void ObserverDispatch::remove(ObserverId p_id) {
-	callbacks_.erase(std::remove_if(callbacks_.begin(), callbacks_.end(),
-			[&](const ObserverCallback &cb) { return cb.id == p_id; }),
-			callbacks_.end());
+	if (!callbacks_) {
+		return;
+	}
+	std::vector<ObserverCallback> copy = *callbacks_;
+	auto it = std::remove_if(copy.begin(), copy.end(),
+			[&](const ObserverCallback &cb) { return cb.id == p_id; });
+	if (it == copy.end()) {
+		return; // not present; keep the shared snapshot untouched
+	}
+	copy.erase(it, copy.end());
+	callbacks_ = std::make_shared<const std::vector<ObserverCallback>>(std::move(copy));
 }
 
 void ObserverDispatch::dispatch(ObserverEventType p_type, Entity p_e, ComponentTypeId p_comp, const godot::String &p_event_name, const godot::Variant &p_payload) {
-	if (callbacks_.empty()) {
+	if (!callbacks_ || callbacks_->empty()) {
 		return;
 	}
+	// COW snapshot: dispatch copies only the shared_ptr (atomic refcount), and
+	// observers may register/unregister during delivery (re-entrancy safe).
+	auto snapshot = callbacks_;
 	uint32_t bit = event_bit(p_type);
-	// COW snapshot: allows observers to register/unregister during delivery.
-	std::vector<ObserverCallback> snapshot = callbacks_;
-	for (const ObserverCallback &cb : snapshot) {
+	for (const ObserverCallback &cb : *snapshot) {
 		if (!(cb.event_mask & bit)) {
 			continue;
 		}
