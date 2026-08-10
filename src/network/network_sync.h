@@ -127,7 +127,9 @@ public:
 	bool is_applying() const { return applying_; }
 
 	// Delivers a serialized packet (RPC in real mode, direct in test mode).
-	void send_packet(SyncPacketKind p_kind, const vortaris::BinaryBuffer &p_data);
+	// p_target_peer > 0 delivers only to that peer (used for targeted full-state
+	// reconciliation to a newly joined peer); 0 broadcasts to all peers.
+	void send_packet(SyncPacketKind p_kind, const vortaris::BinaryBuffer &p_data, int64_t p_target_peer = 0);
 	void apply_packet(SyncPacketKind p_kind, const vortaris::BinaryBuffer &p_data);
 
 	// Test hook: bypass the engine RPC layer and deliver straight to a peer.

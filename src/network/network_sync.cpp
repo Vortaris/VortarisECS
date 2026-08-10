@@ -273,7 +273,7 @@ void VECSSnapshotReplication::send_full_state(VECSNetworkSync &p_ns, int64_t p_p
 	vortaris::BinaryBuffer buf;
 	serialize_full_state(p_ns, buf);
 	if (buf.size() > 0) {
-		p_ns.send_packet(SyncPacketKind::FullState, buf);
+		p_ns.send_packet(SyncPacketKind::FullState, buf, p_peer);
 	}
 }
 
@@ -526,7 +526,7 @@ void VECSNetworkSync::request_full_state() {
 	}
 }
 
-void VECSNetworkSync::send_packet(SyncPacketKind p_kind, const vortaris::BinaryBuffer &p_data) {
+void VECSNetworkSync::send_packet(SyncPacketKind p_kind, const vortaris::BinaryBuffer &p_data, int64_t p_target_peer) {
 	if (direct_peer_) {
 		direct_peer_->apply_packet(p_kind, p_data);
 		return;
@@ -543,7 +543,11 @@ void VECSNetworkSync::send_packet(SyncPacketKind p_kind, const vortaris::BinaryB
 			rpc("_rpc_delta", bytes, session_id_);
 			break;
 		case SyncPacketKind::FullState:
-			rpc("_rpc_full_state", bytes, session_id_);
+			if (p_target_peer > 0) {
+				rpc_id(p_target_peer, "_rpc_full_state", bytes, session_id_);
+			} else {
+				rpc("_rpc_full_state", bytes, session_id_);
+			}
 			break;
 	}
 }
