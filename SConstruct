@@ -64,7 +64,7 @@ if env["target"] in ["editor", "template_debug"]:
         sources = sources + [doc_data]
 
 library = env.SharedLibrary(
-    "demo/bin/vortarisecs{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
+    "demo/addons/vortarisecs/bin/vortarisecs{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
     source=sources,
 )
 

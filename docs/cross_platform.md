@@ -45,10 +45,12 @@ scons platform=macos arch=universal target=template_debug build_library=False go
 scons platform=macos arch=universal target=template_release build_library=False godot_cpp_path=<path-to-godot-cpp>
 ```
 
-Artifacts land in `demo/bin/` as `vortarisecs.<platform>.template_<target>.<arch>.{so,dylib}`.
-`demo/vortarisecs.gdextension` already lists the `linuxbsd` and `macos` entries,
-so once the files are in place the editor picks them up on that platform. The
-first time you open the project, Godot generates `.godot/extension_list.cfg`.
+Artifacts land in `demo/addons/vortarisecs/bin/` as
+`vortarisecs.<platform>.template_<target>.<arch>.{so,dylib}`.
+`demo/addons/vortarisecs/vortarisecs.gdextension` already lists the `linuxbsd`
+and `macos` entries, so once the files are in place the editor picks them up on
+that platform. The first time you open the project, Godot generates
+`.godot/extension_list.cfg`.
 
 ## Verification
 

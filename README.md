@@ -53,7 +53,11 @@ cd <this repo>
 scons platform=windows target=template_debug arch=x86_64 build_library=False
 ```
 
-Output lands in `demo/bin/vortarisecs.windows.*.dll`. The first time you open `demo/` in Godot, the editor generates `.godot/extension_list.cfg` (this registers the extension).
+Output lands in `demo/addons/vortarisecs/bin/vortarisecs.windows.*.dll`. The first time you open `demo/` in Godot, the editor generates `.godot/extension_list.cfg` (this registers the extension).
+
+To use VortarisECS in your own project, copy the `addons/vortarisecs/` folder
+into your project root and reopen the editor — Godot discovers and loads the
+`.gdextension` automatically (it also shows up under Project ▸ Plugins).
 
 Cross-platform: the core is portable and builds on Linux / macOS too — see
 [`docs/cross_platform.md`](docs/cross_platform.md). Releases ship a prebuilt
