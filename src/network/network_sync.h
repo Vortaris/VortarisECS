@@ -135,7 +135,7 @@ public:
 	VECSNetworkSync *get_direct_peer() const { return direct_peer_; }
 
 	// RPC surface (bound + rpc_config'd as ANY_PEER).
-	void _rpc_spawn(const godot::PackedByteArray &p_bytes);
+	void _rpc_spawn(const godot::PackedByteArray &p_bytes, uint32_t p_session);
 	void _rpc_despawn(const godot::PackedByteArray &p_bytes, uint32_t p_session);
 	void _rpc_delta(const godot::PackedByteArray &p_bytes, uint32_t p_session);
 	void _rpc_full_state(const godot::PackedByteArray &p_bytes, uint32_t p_session);

@@ -1,6 +1,7 @@
 #include "vecs_world.h"
 
 #include <algorithm>
+#include <unordered_set>
 
 #include <godot_cpp/classes/json.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -73,6 +74,7 @@ void VECSWorld::set_entity_range(int64_t p_base) {
 bool VECSWorld::register_component(const godot::String &p_name, const godot::Array &p_fields) {
 	std::vector<vortaris::FieldDescriptor> fds;
 	fds.reserve(static_cast<size_t>(p_fields.size()));
+	std::unordered_set<godot::StringName> seen_names;
 	for (int i = 0; i < p_fields.size(); ++i) {
 		if (p_fields[i].get_type() != godot::Variant::DICTIONARY) {
 			ERR_PRINT("VortarisECS: each field of register_component must be a Dictionary {name, type, ...}.");
@@ -83,6 +85,10 @@ bool VECSWorld::register_component(const godot::String &p_name, const godot::Arr
 		godot::String ftype = d.get("type", "");
 		if (fname.is_empty() || ftype.is_empty()) {
 			ERR_PRINT("VortarisECS: field needs both 'name' and 'type'.");
+			return false;
+		}
+		if (!seen_names.insert(godot::StringName(fname)).second) {
+			ERR_PRINT("VortarisECS: duplicate field name '" + fname + "' in component '" + p_name + "'.");
 			return false;
 		}
 		vortaris::FieldType t;

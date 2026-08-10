@@ -34,7 +34,9 @@ private:
 	std::unordered_map<godot::StringName, std::vector<VECSSystem *>> systems_by_group_;
 	std::unordered_map<godot::StringName, std::vector<VECSSystem *>> order_cache_;
 	std::unordered_map<VECSSystem *, double> next_run_;
-	double elapsed_ = 0.0;
+	// Per-group accumulated time so a system's tick_interval is not distorted by
+	// other groups sharing the frame.
+	std::unordered_map<godot::StringName, double> elapsed_by_group_;
 };
 
 } // namespace vortaris

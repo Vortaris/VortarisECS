@@ -68,6 +68,8 @@ void VECSComponent::set_field(const godot::String &p_name, const godot::Variant 
 	}
 	if (vortaris::field_from_variant(*fd, static_cast<uint8_t *>(raw) + fd->offset, p_value)) {
 		world_->mark_changed(entity_, type_id_);
+	} else {
+		ERR_PRINT("VortarisECS: set_field on component '" + get_type_name() + "' field '" + p_name + "' received an incompatible Variant type.");
 	}
 }
 

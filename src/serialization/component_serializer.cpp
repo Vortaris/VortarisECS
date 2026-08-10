@@ -43,7 +43,23 @@ void serialize_component(const ComponentSchema &p_schema, const void *p_inst, Bi
 			default:
 				// Vector/Color/Transform/StringFixed/Blob: raw fixed-size bytes
 				// (IEEE-754 floats and LE ints on all Godot targets).
-				r_buf.write_bytes(ptr, fd.storage_size());
+				if (fd.type == FieldType::StringFixed) {
+					// Only serialize up to the NUL terminator and zero-pad the
+					// rest, so the wire bytes stay deterministic even if C++
+					// wrote a shorter string into the fixed buffer.
+					const char *s = reinterpret_cast<const char *>(ptr);
+					size_t len = 0;
+					while (len < fd.storage_size() && s[len] != '\0') {
+						++len;
+					}
+					r_buf.write_bytes(ptr, len);
+					const uint8_t zero = 0;
+					for (size_t k = len; k < fd.storage_size(); ++k) {
+						r_buf.write_bytes(&zero, 1);
+					}
+				} else {
+					r_buf.write_bytes(ptr, fd.storage_size());
+				}
 				break;
 		}
 	}

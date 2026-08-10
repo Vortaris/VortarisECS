@@ -118,8 +118,9 @@ std::vector<VECSSystem *> &SystemScheduler::ordered(const StringName &p_group) {
 }
 
 void SystemScheduler::process(World &p_world, double p_delta, const godot::String &p_group) {
-	elapsed_ += p_delta;
 	StringName key(p_group);
+	double &elapsed = elapsed_by_group_[key];
+	elapsed += p_delta;
 	auto it = systems_by_group_.find(key);
 	if (it == systems_by_group_.end() || it->second.empty()) {
 		return;
@@ -132,10 +133,10 @@ void SystemScheduler::process(World &p_world, double p_delta, const godot::Strin
 		}
 		if (sys->get_tick_interval() > 0.0) {
 			double last = next_run_.count(sys) ? next_run_[sys] : 0.0;
-			if (elapsed_ < last + sys->get_tick_interval()) {
+			if (elapsed < last + sys->get_tick_interval()) {
 				continue;
 			}
-			next_run_[sys] = elapsed_;
+			next_run_[sys] = elapsed;
 		}
 		sys->handle(p_delta);
 		if (sys->get_flush_mode() == VECSSystem::PER_SYSTEM) {
@@ -156,7 +157,7 @@ void SystemScheduler::clear() {
 	systems_by_group_.clear();
 	order_cache_.clear();
 	next_run_.clear();
-	elapsed_ = 0.0;
+	elapsed_by_group_.clear();
 }
 
 size_t SystemScheduler::system_count() const {

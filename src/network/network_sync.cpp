@@ -29,7 +29,17 @@ void VECSSyncStrategy::_bind_methods() {
 
 bool VECSSnapshotReplication::is_networked(vortaris::ComponentTypeId p_t) {
 	const vortaris::ComponentSchema *s = vortaris::ComponentRegistry::instance().schema_of(p_t);
-	return s && s->is_networked;
+	if (!s || !s->is_networked) {
+		return false;
+	}
+	// SYNC_LOCAL fields never replicate; a component whose fields are all
+	// SYNC_LOCAL is treated as not networked at all.
+	for (const auto &f : s->fields) {
+		if (f.sync_priority != vortaris::SYNC_LOCAL) {
+			return true;
+		}
+	}
+	return false;
 }
 
 void VECSSnapshotReplication::serialize_component_block(VECSNetworkSync &p_ns, vortaris::Entity p_e, vortaris::ComponentTypeId p_t, vortaris::BinaryBuffer &r_buf) {
@@ -524,7 +534,7 @@ void VECSNetworkSync::send_packet(SyncPacketKind p_kind, const vortaris::BinaryB
 	PackedByteArray bytes = p_data.to_packed();
 	switch (p_kind) {
 		case SyncPacketKind::Spawn:
-			rpc("_rpc_spawn", bytes);
+			rpc("_rpc_spawn", bytes, session_id_);
 			break;
 		case SyncPacketKind::Despawn:
 			rpc("_rpc_despawn", bytes, session_id_);
@@ -560,7 +570,10 @@ void VECSNetworkSync::apply_packet(SyncPacketKind p_kind, const vortaris::Binary
 	applying_ = false;
 }
 
-void VECSNetworkSync::_rpc_spawn(const PackedByteArray &p_bytes) {
+void VECSNetworkSync::_rpc_spawn(const PackedByteArray &p_bytes, uint32_t p_session) {
+	if (p_session != session_id_) {
+		return;
+	}
 	vortaris::BinaryBuffer buf;
 	buf.from_packed(p_bytes);
 	apply_packet(SyncPacketKind::Spawn, buf);
@@ -647,7 +660,7 @@ void VECSNetworkSync::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_direct_peer", "peer"), &VECSNetworkSync::set_direct_peer);
 	ClassDB::bind_method(D_METHOD("get_direct_peer"), &VECSNetworkSync::get_direct_peer);
 	ClassDB::bind_method(D_METHOD("reset"), &VECSNetworkSync::reset);
-	ClassDB::bind_method(D_METHOD("_rpc_spawn", "bytes"), &VECSNetworkSync::_rpc_spawn);
+	ClassDB::bind_method(D_METHOD("_rpc_spawn", "bytes", "session"), &VECSNetworkSync::_rpc_spawn);
 	ClassDB::bind_method(D_METHOD("_rpc_despawn", "bytes", "session"), &VECSNetworkSync::_rpc_despawn);
 	ClassDB::bind_method(D_METHOD("_rpc_delta", "bytes", "session"), &VECSNetworkSync::_rpc_delta);
 	ClassDB::bind_method(D_METHOD("_rpc_full_state", "bytes", "session"), &VECSNetworkSync::_rpc_full_state);

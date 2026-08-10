@@ -132,9 +132,9 @@
 			已订阅事件类型的位掩码（[enum Event] 值作为位）。可直接设置，或用 [code]on_*[/code] 辅助方法。
 		</member>
 		<member name="flush_mode" type="int" setter="set_flush_mode" getter="get_flush_mode">
-			[constant PER_CALLBACK] runs a callback right after each event; [constant MANUAL] defers the callback until the user triggers it.
+			When to flush the deferred command buffer: [constant PER_CALLBACK] flushes after each event callback; [constant MANUAL] never auto-flushes (call [method VECSCommandBuffer.flush] yourself).
 
-			[constant PER_CALLBACK] 在每个事件后立即执行回调；[constant MANUAL] 延迟回调直到用户触发。
+			控制延迟命令缓冲的冲刷时机：[constant PER_CALLBACK] 在每个事件回调后冲刷；[constant MANUAL] 从不自动冲刷（自行调用 [method VECSCommandBuffer.flush]）。
 		</member>
 	</members>
 	<constants>
@@ -169,14 +169,14 @@
 			用 [method VECSWorld.emit_event] 广播了自定义事件。
 		</constant>
 		<constant name="PER_CALLBACK" value="0" enum="FlushMode">
-			Deliver the callback immediately when the event fires.
+			Flush the command buffer after each event callback.
 
-			事件触发时立即执行回调。
+			在每个事件回调后冲刷命令缓冲。
 		</constant>
 		<constant name="MANUAL" value="1" enum="FlushMode">
-			Defer delivery until the user triggers it.
+			Never auto-flush; call [method VECSCommandBuffer.flush] manually.
 
-			延迟派发直到用户触发。
+			从不自动冲刷；手动调用 [method VECSCommandBuffer.flush]。
 		</constant>
 	</constants>
 </class>
