@@ -2,9 +2,13 @@
 <class name="ViewSystem" inherits="VECSSystem" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
 	<brief_description>
 		Demo C++ system exercising cached [code]View[/code] and change-aware [code]ChangeView[/code] iteration.
+
+		演示用 C++ 系统：演练缓存的 [code]View[/code] 与变更感知的 [code]ChangeView[/code] 迭代。
 	</brief_description>
 	<description>
 		An example system compiled into the extension. It builds a cached [code]World::view&lt;Position&gt;[/code] and a change-aware [code]ChangeView&lt;Position&gt;[/code] in [code]_setup[/code], then counts the entities seen by each on every tick. Demonstrates compile-once views and change-aware iteration.
+
+		一个编译进扩展的示例系统。它在 [code]_setup[/code] 中构建一个缓存的 [code]World::view&lt;Position&gt;[/code] 与一个变更感知的 [code]ChangeView&lt;Position&gt;[/code]，随后每帧统计各自看到的实体数。演示了编译一次视图与变更感知迭代。
 	</description>
 	<tutorials>
 		<link title="README (Cached views)">https://github.com/Vortaris/VortarisECS/blob/main/README.md</link>
@@ -14,12 +18,16 @@
 			<return type="int" />
 			<description>
 				Returns how many entities the change-aware view reported on the last tick.
+
+				返回变更感知视图在最近一次驱动中报告的实体数量。
 			</description>
 		</method>
 		<method name="get_view_count" qualifiers="const">
 			<return type="int" />
 			<description>
 				Returns how many entities the cached view saw on the last tick.
+
+				返回缓存视图在最近一次驱动中看到的实体数量。
 			</description>
 		</method>
 	</methods>

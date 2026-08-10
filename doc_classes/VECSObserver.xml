@@ -2,11 +2,17 @@
 <class name="VECSObserver" inherits="Node" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
 	<brief_description>
 		A reactive, event-driven observer that reacts to component changes.
+
+		响应式、事件驱动的观察者，对组件变化做出反应。
 	</brief_description>
 	<description>
 		[b]VECSObserver[/b] subscribes to ECS events (component ADDED / REMOVED / CHANGED, membership MATCHED / UNMATCHED, and custom events). When a matching event fires, the observer's callback runs — GDScript observers override [method _script_each], C++ observers override [code]_each[/code].
 
 		Subscribe to event kinds by calling the [code]on_*[/code] helpers (e.g. [method on_added]) or by setting [member events] as a bitmask. Filter by component type with [method set_components]; for MATCHED/UNMATCHED use [method set_match_components]. Register the observer with [method VECSWorld.add_observer].
+
+		[b]VECSObserver[/b] 订阅 ECS 事件（组件 ADDED / REMOVED / CHANGED、成员 MATCHED / UNMATCHED，以及自定义事件）。匹配事件触发时执行观察者的回调——GDScript 观察者覆写 [method _script_each]，C++ 观察者覆写 [code]_each[/code]。
+
+		通过调用 [code]on_*[/code] 辅助方法（如 [method on_added]）或以位掩码设置 [member events] 来订阅事件类型。用 [method set_components] 按组件类型过滤；MATCHED/UNMATCHED 用 [method set_match_components]。用 [method VECSWorld.add_observer] 注册观察者。
 	</description>
 	<tutorials>
 		<link title="Quickstart">https://github.com/Vortaris/VortarisECS/blob/main/docs/quickstart.md</link>
@@ -19,60 +25,80 @@
 			<param index="2" name="payload" type="Variant" />
 			<description>
 				GDScript override point, called for every subscribed event. [param event] is one of the [enum Event] values, [param entity] is the affected entity, [param payload] carries event-specific data (custom payloads, or empty for component events).
+
+				GDScript 覆写点，每个已订阅事件触发时调用。[param event] 是 [enum Event] 之一，[param entity] 是受影响的实体，[param payload] 携带事件特定数据（自定义载荷，组件事件则为空）。
 			</description>
 		</method>
 		<method name="get_components" qualifiers="const">
 			<return type="Array" />
 			<description>
 				Returns the component filter set with [method set_components].
+
+				返回用 [method set_components] 设置的组件过滤器。
 			</description>
 		</method>
 		<method name="get_match_components" qualifiers="const">
 			<return type="Array" />
 			<description>
 				Returns the membership query set with [method set_match_components].
+
+				返回用 [method set_match_components] 设置的成员查询。
 			</description>
 		</method>
 		<method name="get_world" qualifiers="const">
 			<return type="VECSWorld" />
 			<description>
 				Returns the [VECSWorld] this observer is attached to.
+
+				返回该观察者所挂载的 [VECSWorld]。
 			</description>
 		</method>
 		<method name="on_added">
 			<return type="void" />
 			<description>
 				Subscribes to ADDED events (a component was attached to an entity).
+
+				订阅 ADDED 事件（组件被挂载到实体上）。
 			</description>
 		</method>
 		<method name="on_changed">
 			<return type="void" />
 			<description>
 				Subscribes to CHANGED events (a component value was written).
+
+				订阅 CHANGED 事件（组件值被写入）。
 			</description>
 		</method>
 		<method name="on_custom">
 			<return type="void" />
 			<description>
 				Subscribes to custom events broadcast with [method VECSWorld.emit_event]. Combine with [member custom_event_name] to filter by event name.
+
+				订阅用 [method VECSWorld.emit_event] 广播的自定义事件。可结合 [member custom_event_name] 按事件名过滤。
 			</description>
 		</method>
 		<method name="on_matched">
 			<return type="void" />
 			<description>
 				Subscribes to MATCHED events (an entity entered the membership query set with [method set_match_components]).
+
+				订阅 MATCHED 事件（实体进入用 [method set_match_components] 设置的成员查询集合）。
 			</description>
 		</method>
 		<method name="on_removed">
 			<return type="void" />
 			<description>
 				Subscribes to REMOVED events (a component was detached or an entity was destroyed).
+
+				订阅 REMOVED 事件（组件被移除或实体被销毁）。
 			</description>
 		</method>
 		<method name="on_unmatched">
 			<return type="void" />
 			<description>
 				Subscribes to UNMATCHED events (an entity left the membership query set).
+
+				订阅 UNMATCHED 事件（实体离开成员查询集合）。
 			</description>
 		</method>
 		<method name="set_components">
@@ -80,6 +106,8 @@
 			<param index="0" name="names" type="Array" />
 			<description>
 				Restricts the observer to events about the named components. Empty means "watch all components".
+
+				把观察者限制为只处理与所列组件相关的事件。为空表示"观察所有组件"。
 			</description>
 		</method>
 		<method name="set_match_components">
@@ -87,44 +115,68 @@
 			<param index="0" name="names" type="Array" />
 			<description>
 				Sets the component-set query for MATCHED / UNMATCHED membership events. The observer tracks which entities match the set and reports transitions.
+
+				为 MATCHED / UNMATCHED 成员事件设置组件集查询。观察者跟踪哪些实体匹配该集合并报告状态转换。
 			</description>
 		</method>
 	</methods>
 	<members>
 		<member name="custom_event_name" type="String" setter="set_custom_event_name" getter="get_custom_event_name">
 			When subscribing to custom events, only events with this name are delivered. Empty means all custom events.
+
+			订阅自定义事件时，只派发该名称的事件。为空表示所有自定义事件。
 		</member>
 		<member name="events" type="int" setter="set_events" getter="get_events">
 			Bitmask of subscribed event kinds (the [enum Event] values as bits). Set it directly or use the [code]on_*[/code] helpers.
+
+			已订阅事件类型的位掩码（[enum Event] 值作为位）。可直接设置，或用 [code]on_*[/code] 辅助方法。
 		</member>
 		<member name="flush_mode" type="int" setter="set_flush_mode" getter="get_flush_mode">
 			[constant PER_CALLBACK] runs a callback right after each event; [constant MANUAL] defers the callback until the user triggers it.
+
+			[constant PER_CALLBACK] 在每个事件后立即执行回调；[constant MANUAL] 延迟回调直到用户触发。
 		</member>
 	</members>
 	<constants>
 		<constant name="ADDED" value="0" enum="Event">
 			A component was added to an entity.
+
+			组件被添加到一个实体。
 		</constant>
 		<constant name="REMOVED" value="1" enum="Event">
 			A component was removed from an entity, or the entity was destroyed.
+
+			组件从实体被移除，或实体被销毁。
 		</constant>
 		<constant name="CHANGED" value="2" enum="Event">
 			A component value was written.
+
+			组件值被写入。
 		</constant>
 		<constant name="MATCHED" value="3" enum="Event">
 			An entity started matching the membership query.
+
+			实体开始匹配成员查询。
 		</constant>
 		<constant name="UNMATCHED" value="4" enum="Event">
 			An entity stopped matching the membership query.
+
+			实体停止匹配成员查询。
 		</constant>
 		<constant name="CUSTOM" value="5" enum="Event">
 			A custom event was broadcast with [method VECSWorld.emit_event].
+
+			用 [method VECSWorld.emit_event] 广播了自定义事件。
 		</constant>
 		<constant name="PER_CALLBACK" value="0" enum="FlushMode">
 			Deliver the callback immediately when the event fires.
+
+			事件触发时立即执行回调。
 		</constant>
 		<constant name="MANUAL" value="1" enum="FlushMode">
 			Defer delivery until the user triggers it.
+
+			延迟派发直到用户触发。
 		</constant>
 	</constants>
 </class>

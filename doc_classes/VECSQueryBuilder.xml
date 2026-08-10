@@ -2,6 +2,8 @@
 <class name="VECSQueryBuilder" inherits="RefCounted" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
 	<brief_description>
 		A fluent, chainable query builder for the ECS world.
+
+		面向 ECS 世界的流畅链式查询构建器。
 	</brief_description>
 	<description>
 		[b]VECSQueryBuilder[/b] describes which entities to select. Every term method returns [code]this[/code] so calls can be chained, then one of the terminal methods runs the query:
@@ -14,6 +16,17 @@
 		[/codeblock]
 
 		Query construction is cheap — matching is cached incrementally in the core, so repeated queries cost little. Obtain a builder from [method VECSWorld.query].
+
+		[b]VECSQueryBuilder[/b] 描述要选择哪些实体。每个条件方法都返回 [code]this[/code] 以支持链式调用，最后由某个终结方法执行查询：
+
+		[codeblock]
+		var hits: Array = world.query() \
+		    .with_all(["Position", "Velocity"]) \
+		    .enabled() \
+		    .execute()
+		[/codeblock]
+
+		查询构建开销很低——核心会增量缓存匹配结果，因此重复查询成本很小。通过 [method VECSWorld.query] 获取构建器。
 	</description>
 	<tutorials>
 		<link title="Quickstart">https://github.com/Vortaris/VortarisECS/blob/main/docs/quickstart.md</link>
@@ -24,30 +37,40 @@
 			<param index="0" name="names" type="Array" default="[]" />
 			<description>
 				Restricts the query to entities whose named components were written since the previous execution of a query with the same membership and changed set. The baseline is tracked per query, so filters do not interfere. Ideal for sparse, event-driven systems.
+
+				把查询限制为：其指定组件自"具有相同成员与变更集的查询上次执行以来"被写入过的实体。基线按查询分别跟踪，过滤器互不干扰。非常适合稀疏、事件驱动的系统。
 			</description>
 		</method>
 		<method name="count">
 			<return type="int" />
 			<description>
 				Returns the number of matching entities without materializing them.
+
+				返回匹配实体数量而不物化它们。
 			</description>
 		</method>
 		<method name="enabled">
 			<return type="VECSQueryBuilder" />
 			<description>
 				Restricts the query to entities whose enabled flag is set (via [method VECSSystem]-independent entity enable/disable state).
+
+				把查询限制为启用了 enabled 标记的实体（通过与 [method VECSSystem] 无关的实体启用/禁用状态）。
 			</description>
 		</method>
 		<method name="execute">
 			<return type="Array" />
 			<description>
 				Runs the query and returns an [Array] of matching [VECSEntity] handles. For large result sets consider [method VECSWorld.each] to avoid materializing the array.
+
+				执行查询并返回匹配 [VECSEntity] 句柄的 [Array]。结果集很大时，可考虑 [method VECSWorld.each] 以避免物化数组。
 			</description>
 		</method>
 		<method name="execute_one">
 			<return type="VECSEntity" />
 			<description>
 				Runs the query and returns the first matching entity (or a null handle if none match). Honors the same filters as [method execute], including [method changed].
+
+				执行查询并返回第一个匹配实体（无匹配则返回空句柄）。遵守与 [method execute] 相同的过滤器，包括 [method changed]。
 			</description>
 		</method>
 		<method name="with_all">
@@ -55,6 +78,8 @@
 			<param index="0" name="names" type="Array" />
 			<description>
 				Requires the entity to have every component named in [param names]. Unknown names are ignored with an error printed.
+
+				要求实体拥有 [param names] 中列出的全部组件。未知名称会被忽略并打印错误。
 			</description>
 		</method>
 		<method name="with_any">
@@ -62,6 +87,8 @@
 			<param index="0" name="names" type="Array" />
 			<description>
 				Requires the entity to have at least one of the components named in [param names].
+
+				要求实体拥有 [param names] 中列出的至少一个组件。
 			</description>
 		</method>
 		<method name="with_none">
@@ -69,6 +96,8 @@
 			<param index="0" name="names" type="Array" />
 			<description>
 				Requires the entity to have none of the components named in [param names].
+
+				要求实体不拥有 [param names] 中列出的任何组件。
 			</description>
 		</method>
 	</methods>

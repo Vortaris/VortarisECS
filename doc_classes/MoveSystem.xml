@@ -2,9 +2,13 @@
 <class name="MoveSystem" inherits="VECSSystem" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
 	<brief_description>
 		Demo C++ system that integrates Position and Velocity components.
+
+		演示用 C++ 系统：对 Position 与 Velocity 组件做积分。
 	</brief_description>
 	<description>
 		An example system compiled into the extension. For every entity with both [code]Position[/code] and [code]Velocity[/code], it adds [code]velocity * delta[/code] to position. Demonstrates the typed [code]World::for_each&lt;Position, Velocity&gt;[/code] hot path with zero Variant overhead.
+
+		一个编译进扩展的示例系统。对每个同时拥有 [code]Position[/code] 与 [code]Velocity[/code] 的实体，它把 [code]velocity * delta[/code] 累加到 position。演示了零 Variant 开销的类型化 [code]World::for_each&lt;Position, Velocity&gt;[/code] 热路径。
 	</description>
 	<tutorials>
 		<link title="README (C++ systems)">https://github.com/Vortaris/VortarisECS/blob/main/README.md</link>
@@ -14,6 +18,8 @@
 			<return type="int" />
 			<description>
 				Returns how many entities the system processed on its last tick (used by tests and the demo).
+
+				返回系统在最近一次驱动中处理的实体数量（供测试与 demo 使用）。
 			</description>
 		</method>
 	</methods>

@@ -2,11 +2,17 @@
 <class name="VECSCommandBuffer" inherits="RefCounted" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
 	<brief_description>
 		A deferred queue for structural changes (add/remove component, destroy entity).
+
+		结构性变更（增删组件、销毁实体）的延迟队列。
 	</brief_description>
 	<description>
 		[b]VECSCommandBuffer[/b] batches structural changes so they can be applied at a safe point. Multiple changes to the same entity collapse into a single archetype transition, and events are dispatched per net change (e.g. [code][add A, remove A][/code] nets to "no A").
 
 		Structural changes are forbidden inside [method VECSWorld.each] and C++ iterations; queue them here and call [method flush] once afterwards. All handles returned by [method VECSWorld.commands] share the same world-level buffer, so [method flush] applies everything queued by every handle.
+
+		[b]VECSCommandBuffer[/b] 批量缓存结构性变更，以便在安全时机统一应用。对同一实体的多次变更会合并为一次 archetype 迁移，事件按净变化派发（例如 [code][add A, remove A][/code] 抵消为"没有 A"）。
+
+		在 [method VECSWorld.each] 与 C++ 迭代内禁止结构性变更；把它们入队，之后调用一次 [method flush]。[method VECSWorld.commands] 返回的所有句柄共享同一个世界级缓冲，因此 [method flush] 会应用所有句柄入队的全部操作。
 	</description>
 	<tutorials>
 		<link title="Quickstart">https://github.com/Vortaris/VortarisECS/blob/main/docs/quickstart.md</link>
@@ -19,6 +25,8 @@
 			<param index="2" name="fields" type="Dictionary" default="{}" />
 			<description>
 				Queues adding the component [param type_name] (initialized from [param fields]) to [param entity] at the next [method flush].
+
+				入队：在下次 [method flush] 时向 [param entity] 添加组件 [param type_name]（用 [param fields] 初始化）。
 			</description>
 		</method>
 		<method name="add_entity">
@@ -26,12 +34,16 @@
 			<param index="0" name="entity" type="VECSEntity" />
 			<description>
 				Queues creating [param entity] at the next [method flush]. Pass a preassigned handle (e.g. from the network layer) whose id should exist by then.
+
+				入队：在下次 [method flush] 时创建 [param entity]。请传入预分配的句柄（例如来自网络层），届时其 id 应已存在。
 			</description>
 		</method>
 		<method name="flush">
 			<return type="void" />
 			<description>
 				Applies every queued operation now and clears the buffer. Safe to call from anywhere outside an iteration. Flushing inside an iteration is rejected.
+
+				立即应用全部已入队操作并清空缓冲。可在迭代外的任何位置安全调用。迭代内 flush 会被拒绝。
 			</description>
 		</method>
 		<method name="remove_component">
@@ -40,6 +52,8 @@
 			<param index="1" name="type_name" type="String" />
 			<description>
 				Queues removing the component [param type_name] from [param entity] at the next [method flush].
+
+				入队：在下次 [method flush] 时从 [param entity] 移除组件 [param type_name]。
 			</description>
 		</method>
 		<method name="remove_entity">
@@ -47,12 +61,16 @@
 			<param index="0" name="entity" type="VECSEntity" />
 			<description>
 				Queues destroying [param entity] at the next [method flush].
+
+				入队：在下次 [method flush] 时销毁 [param entity]。
 			</description>
 		</method>
 		<method name="size" qualifiers="const">
 			<return type="int" />
 			<description>
 				Returns the number of operations currently queued in the shared world buffer.
+
+				返回当前在共享世界缓冲中排队待执行的操作数量。
 			</description>
 		</method>
 	</methods>

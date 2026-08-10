@@ -2,11 +2,17 @@
 <class name="VECSNetworkSync" inherits="Node" api_type="extension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
 	<brief_description>
 		Central network coordinator: binds a world to a sync strategy and exposes the RPC transport.
+
+		网络同步中枢：把世界绑定到同步策略并暴露 RPC 传输层。
 	</brief_description>
 	<description>
 		[b]VECSNetworkSync[/b] connects one [VECSWorld] to a [VECSSyncStrategy] (default: [VECSSnapshotReplication]) and drives replication. On the server, call [method tick] each frame; the strategy spawns networked entities, pushes dirty fields as deltas, despawns destroyed entities and periodically broadcasts a full state for reconciliation.
 
 		Transport is Godot's MultiplayerAPI (RPC); for testing, connect two nodes with [method set_direct_peer] to deliver packets in-process without a network.
+
+		[b]VECSNetworkSync[/b] 把一个 [VECSWorld] 连接到 [VECSSyncStrategy]（默认：[VECSSnapshotReplication]）并驱动复制。在服务器上每帧调用 [method tick]；策略会生成网络实体、以增量推送脏字段、销毁实体的反生成，并定期广播全量状态以对账。
+
+		传输层是 Godot 的 MultiplayerAPI（RPC）；测试时用 [method set_direct_peer] 连接两个节点，即可在进程内传递数据包而无需网络。
 	</description>
 	<tutorials>
 		<link title="README (Network sync)">https://github.com/Vortaris/VortarisECS/blob/main/README.md</link>
@@ -17,42 +23,56 @@
 			<param index="0" name="world" type="VECSWorld" />
 			<description>
 				Binds this sync node to [param world]. Registers an observer that forwards component events to the strategy and seeds the strategy from the current world contents.
+
+				把该同步节点绑定到 [param world]。注册一个观察者，把组件事件转发给策略，并从当前世界内容为策略播种。
 			</description>
 		</method>
 		<method name="get_direct_peer" qualifiers="const">
 			<return type="VECSNetworkSync" />
 			<description>
 				Returns the in-process peer set with [method set_direct_peer].
+
+				返回用 [method set_direct_peer] 设置的进程内对等节点。
 			</description>
 		</method>
 		<method name="get_session_id" qualifiers="const">
 			<return type="int" />
 			<description>
 				Returns the current replication session id. Packets carrying an older session id are ignored.
+
+				返回当前复制会话 id。携带更旧会话 id 的数据包会被忽略。
 			</description>
 		</method>
 		<method name="get_strategy" qualifiers="const">
 			<return type="VECSSyncStrategy" />
 			<description>
 				Returns the active sync strategy.
+
+				返回当前生效的同步策略。
 			</description>
 		</method>
 		<method name="is_server" qualifiers="const">
 			<return type="bool" />
 			<description>
 				Returns [code]true[/code] if this node is configured as the authoritative server.
+
+				若该节点被配置为权威服务器则返回 [code]true[/code]。
 			</description>
 		</method>
 		<method name="request_full_state">
 			<return type="void" />
 			<description>
 				Immediately broadcasts a full-state snapshot to every connected peer (reconciliation).
+
+				立即向每个已连接的对等节点广播全量状态快照（对账）。
 			</description>
 		</method>
 		<method name="reset">
 			<return type="void" />
 			<description>
 				Unregisters the world observer and resets the strategy's tracked state.
+
+				注销世界观察者并重置策略的跟踪状态。
 			</description>
 		</method>
 		<method name="set_direct_peer">
@@ -60,6 +80,8 @@
 			<param index="0" name="peer" type="VECSNetworkSync" />
 			<description>
 				Sets an in-process peer for testing: packets are delivered directly to [param peer] instead of going through the RPC layer.
+
+				为测试设置进程内对等节点：数据包直接送达 [param peer]，而不经过 RPC 层。
 			</description>
 		</method>
 		<method name="set_server">
@@ -67,6 +89,8 @@
 			<param index="0" name="value" type="bool" />
 			<description>
 				Sets whether this node acts as the authoritative server.
+
+				设置该节点是否作为权威服务器。
 			</description>
 		</method>
 		<method name="set_session_id">
@@ -74,6 +98,8 @@
 			<param index="0" name="value" type="int" />
 			<description>
 				Sets the replication session id; packets from older sessions are dropped.
+
+				设置复制会话 id；更旧会话的数据包会被丢弃。
 			</description>
 		</method>
 		<method name="set_strategy">
@@ -81,6 +107,8 @@
 			<param index="0" name="strategy" type="VECSSyncStrategy" />
 			<description>
 				Swaps in a custom [VECSSyncStrategy] implementation. The new strategy is seeded from the current world.
+
+				换入自定义的 [VECSSyncStrategy] 实现。新策略会从当前世界播种。
 			</description>
 		</method>
 		<method name="tick">
@@ -88,6 +116,8 @@
 			<param index="0" name="delta" type="float" />
 			<description>
 				Drives the strategy once per frame with [param delta] seconds. On the server this sends spawns, deltas, despawns and periodic reconciliations.
+
+				以 [param delta] 秒每帧驱动一次策略。在服务器上会发送生成、增量、反生成与定期对账。
 			</description>
 		</method>
 	</methods>
