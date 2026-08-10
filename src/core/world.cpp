@@ -362,6 +362,10 @@ void World::compact() {
 }
 
 void World::clear() {
+	if (in_iteration()) {
+		ERR_PRINT("VortarisECS: clear() during for_each/view iteration is unsafe; defer it.");
+		return;
+	}
 	// Snapshot load replaces the world. Destroy every entity without dispatching
 	// Removed events (loading a save is not "death"); keep archetypes for reuse
 	// and the id space (preassigned ids overwrite generations on load).
@@ -410,6 +414,10 @@ void World::set_changed_baseline(uint64_t p_query_signature, uint32_t p_tick) {
 
 Archetype *World::move_entity(Entity p_e, Archetype *p_target, uint32_t *r_row) {
 	if (!is_alive(p_e)) {
+		return nullptr;
+	}
+	if (in_iteration()) {
+		ERR_PRINT("VortarisECS: move_entity() during for_each/view iteration is unsafe; defer it via commands().");
 		return nullptr;
 	}
 	auto it = entity_locations_.find(p_e);
@@ -606,6 +614,12 @@ uint32_t World::_move_entity_to(Entity p_e, Archetype *p_from, Archetype *p_to, 
 		} else {
 			const ComponentSchema *s = registry().schema_of(src_ids[i]);
 			std::memcpy(p_to->columns[j].row(new_row), p_from->columns[i].row(p_from_row), s->size);
+			// Preserve the source version for shared columns so an archetype move
+			// does not spuriously mark unchanged shared components as changed
+			// (add_entity above stamped every target column with the current tick).
+			if (p_to->columns[j].has_versions() && p_from->columns[i].has_versions()) {
+				p_to->columns[j].set_version(new_row, p_from->columns[i].version_at(p_from_row));
+			}
 			++i;
 			++j;
 		}

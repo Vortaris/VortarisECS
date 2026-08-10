@@ -53,6 +53,12 @@ void CommandBuffer::execute(World &p_world) {
 	if (ops_.empty()) {
 		return;
 	}
+	if (p_world.in_iteration()) {
+		// Flushing inside an iteration would let _commit_deferred_move migrate
+		// archetypes under the walker. Defer the flush to a safe point instead.
+		ERR_PRINT("VortarisECS: flush_command_buffers() during for_each/view iteration is unsafe; flush outside the loop.");
+		return;
+	}
 	// Swap the queue out first so a flush triggered from inside a handler is
 	// safe (re-entrancy).
 	std::vector<Command> ops;

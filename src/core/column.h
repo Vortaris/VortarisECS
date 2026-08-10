@@ -134,6 +134,9 @@ public:
 	bool row_changed_since(size_t i, uint32_t p_baseline) const {
 		return tracking_ && i < versions_.size() && versions_[i] > p_baseline;
 	}
+	uint32_t version_at(size_t i) const {
+		return tracking_ && i < versions_.size() ? versions_[i] : 0;
+	}
 	bool has_versions() const { return tracking_; }
 
 private:
