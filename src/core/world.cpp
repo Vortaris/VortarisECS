@@ -392,6 +392,10 @@ void World::clear() {
 		_free_entity_id(e);
 	}
 	_invalidate_cache();
+	// Notify listeners (e.g. network sync) that the world was replaced wholesale,
+	// so they can drop their tracked state. Loading a save is not per-entity
+	// "death", hence the custom event instead of per-entity Removed events.
+	observer_dispatch_.dispatch(ObserverEventType::Custom, Entity{}, 0, godot::String("world_cleared"), godot::Variant());
 }
 
 uint32_t World::changed_baseline(uint64_t p_query_signature, bool *r_existed) {

@@ -70,6 +70,7 @@ public:
 	void apply_full_state(VECSNetworkSync &p_ns, const vortaris::BinaryBuffer &p_data) override;
 	void apply_despawn(VECSNetworkSync &p_ns, const vortaris::BinaryBuffer &p_data) override;
 	void send_full_state(VECSNetworkSync &p_ns, int64_t p_peer) override;
+	void reset_state() override;
 
 	void set_reconciliation_interval(double p_v) { reconciliation_interval_ = p_v; }
 	double get_reconciliation_interval() const { return reconciliation_interval_; }

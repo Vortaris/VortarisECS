@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include <godot_cpp/core/error_macros.hpp>
+#include <godot_cpp/core/gdextension_interface_loader.hpp>
 #include <godot_cpp/variant/string_name.hpp>
 
 #include "../core/component_registry.h"
@@ -177,7 +178,14 @@ void VECSObserver::evaluate_match(vortaris::Entity p_entity) {
 
 void VECSObserver::_notification(int p_what) {
 	if (p_what == NOTIFICATION_PREDELETE && world_) {
-		world_->remove_observer(this);
+		// The VECSWorld singleton may be freed before this node (extension unload
+		// order is not guaranteed). Resolve the world's instance id through the
+		// engine so a stale pointer does not become a use-after-free.
+		GDExtensionObjectPtr live = godot::gdextension_interface::object_get_instance_from_id(world_->get_instance_id());
+		if (live != nullptr) {
+			world_->remove_observer(this);
+		}
+		world_ = nullptr;
 	}
 }
 

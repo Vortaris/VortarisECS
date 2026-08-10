@@ -292,6 +292,21 @@ godot::Array VECSWorld::spawn_from_data(const godot::Array &p_entities) {
 		if (edata.has("components")) {
 			const godot::Dictionary comps = edata["components"];
 			const godot::Array comp_names = comps.keys();
+			// Pre-flight: every named component must be registered, otherwise the
+			// entity would be left partially initialized ("ghost entity").
+			bool valid = true;
+			for (int j = 0; j < comp_names.size(); ++j) {
+				const godot::String cname = comp_names[j];
+				if (core_->registry().id_of(godot::StringName(cname)) == vortaris::INVALID_COMPONENT_TYPE) {
+					ERR_PRINT("VortarisECS: spawn_from_data component '" + cname + "' is not registered; entity skipped.");
+					valid = false;
+					break;
+				}
+			}
+			if (!valid) {
+				core_->destroy_entity(ent->entity());
+				continue;
+			}
 			for (int j = 0; j < comp_names.size(); ++j) {
 				const godot::String cname = comp_names[j];
 				const godot::Dictionary fields = comps[cname];

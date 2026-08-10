@@ -106,8 +106,11 @@ void VECSSnapshotReplication::seed_from_world(VECSNetworkSync &p_ns) {
 				}
 			}
 			if (any) {
-				tracked_.insert(a->entities[row]);
-				pending_spawn_.insert(a->entities[row]);
+				// Only newly-tracked entities are queued for spawn, so repeated
+				// seeding (e.g. set_strategy at runtime) does not respawn them.
+				if (tracked_.insert(a->entities[row]).second) {
+					pending_spawn_.insert(a->entities[row]);
+				}
 			}
 		}
 	}
@@ -262,6 +265,18 @@ void VECSSnapshotReplication::send_full_state(VECSNetworkSync &p_ns, int64_t p_p
 	if (buf.size() > 0) {
 		p_ns.send_packet(SyncPacketKind::FullState, buf);
 	}
+}
+
+void VECSSnapshotReplication::reset_state() {
+	// The world was replaced wholesale (snapshot load) — drop every tracked id
+	// so no stale handles linger in the dirty/spawn/despawn sets.
+	tracked_.clear();
+	dirty_.clear();
+	pending_spawn_.clear();
+	pending_despawn_.clear();
+	client_replicated_.clear();
+	tick_count_ = 0;
+	reconcile_accum_ = 0.0;
 }
 
 void VECSSnapshotReplication::apply_spawn(VECSNetworkSync &p_ns, const vortaris::BinaryBuffer &p_data) {
@@ -466,7 +481,7 @@ void VECSNetworkSync::bind_world(VECSWorld *p_world) {
 	world_ = p_world;
 	if (world_) {
 		vortaris::ObserverCallback cb;
-		cb.event_mask = vortaris::EVENT_ADDED | vortaris::EVENT_CHANGED | vortaris::EVENT_REMOVED;
+		cb.event_mask = vortaris::EVENT_ADDED | vortaris::EVENT_CHANGED | vortaris::EVENT_REMOVED | vortaris::EVENT_CUSTOM;
 		cb.watch_all = true;
 		cb.fn = [this](vortaris::ObserverEventType p_type, vortaris::Entity p_e, vortaris::ComponentTypeId p_comp, const godot::String &p_name, const godot::Variant &p_payload) {
 			_on_world_event(p_type, p_e, p_comp, p_name, p_payload);
@@ -601,6 +616,11 @@ void VECSNetworkSync::_on_world_event(vortaris::ObserverEventType p_type, vortar
 			break;
 		case vortaris::ObserverEventType::Removed:
 			strategy_->on_entity_component_removed(*this, p_e, p_comp);
+			break;
+		case vortaris::ObserverEventType::Custom:
+			if (p_name == "world_cleared") {
+				strategy_->reset_state();
+			}
 			break;
 		default:
 			break;
