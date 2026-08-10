@@ -5,5 +5,13 @@ compatibility_minimum = "4.7"
 
 [libraries]
 
+; Windows (prebuilt in every release)
 windows.debug.x86_64 = "res://bin/vortarisecs.windows.template_debug.x86_64.dll"
 windows.release.x86_64 = "res://bin/vortarisecs.windows.template_release.x86_64.dll"
+
+; Linux / macOS: build these on the target platform (see docs/cross_platform.md),
+; then drop the artifacts into demo/bin/.
+linuxbsd.debug.x86_64 = "res://bin/vortarisecs.linuxbsd.template_debug.x86_64.so"
+linuxbsd.release.x86_64 = "res://bin/vortarisecs.linuxbsd.template_release.x86_64.so"
+macos.debug.universal = "res://bin/vortarisecs.macos.template_debug.universal.dylib"
+macos.release.universal = "res://bin/vortarisecs.macos.template_release.universal.dylib"

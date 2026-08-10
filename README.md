@@ -55,6 +55,10 @@ scons platform=windows target=template_debug arch=x86_64 build_library=False
 
 Output lands in `demo/bin/vortarisecs.windows.*.dll`. The first time you open `demo/` in Godot, the editor generates `.godot/extension_list.cfg` (this registers the extension).
 
+Cross-platform: the core is portable and builds on Linux / macOS too — see
+[`docs/cross_platform.md`](docs/cross_platform.md). Releases ship a prebuilt
+Windows x86_64 plugin; other platforms build once on their own machine.
+
 Run the demo (functional + performance):
 
 ```
