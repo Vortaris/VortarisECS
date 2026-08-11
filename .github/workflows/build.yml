@@ -1,0 +1,139 @@
+name: Build plugin
+
+# Builds VortarisECS on its native platforms and (on version tags) uploads the
+# ready-to-use addon archives to the GitHub Release. Each platform is compiled
+# by an official runner of that OS.
+#
+# Triggers:
+#   - tag v*: compile + attach per-platform zips to the GitHub Release
+#   - manual: workflow_dispatch
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x86_64
+            os: windows-latest
+            platform: windows
+            arch: x86_64
+            ext: .dll
+            pkg: windows
+          - name: Linux x86_64
+            os: ubuntu-latest
+            # godot-cpp v10 names this platform 'linux' (Godot's .gdextension
+            # key / artifact name is 'linuxbsd'; SConstruct maps it).
+            platform: linux
+            arch: x86_64
+            ext: .so
+            pkg: linuxbsd
+          - name: macOS universal
+            os: macos-latest
+            platform: macos
+            arch: universal
+            ext: .dylib
+            pkg: macos
+
+    env:
+      GODOT_CPP_PATH: ${{ github.workspace }}/godot-cpp
+
+    # Explicit bash shell everywhere: the Windows runner's default shell is
+    # PowerShell, where `$VAR` does not expand environment variables.
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SCons
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install scons
+
+      # Pull godot-cpp with the official checkout action instead of a bare
+      # `git clone` (which is unreliable on Windows runners).
+      - name: Checkout godot-cpp (v10 master, Godot 4.7 API)
+        uses: actions/checkout@v4
+        with:
+          repository: godotengine/godot-cpp
+          ref: master
+          path: godot-cpp
+
+      - name: Prebuild godot-cpp (debug)
+        run: scons platform=${{ matrix.platform }} target=template_debug arch=${{ matrix.arch }} -j4
+        working-directory: godot-cpp
+
+      - name: Prebuild godot-cpp (release)
+        run: scons platform=${{ matrix.platform }} target=template_release arch=${{ matrix.arch }} -j4
+        working-directory: godot-cpp
+
+      - name: Build plugin (debug)
+        run: scons platform=${{ matrix.platform }} target=template_debug arch=${{ matrix.arch }} build_library=False godot_cpp_path="$GODOT_CPP_PATH" -j4
+
+      - name: Build plugin (release)
+        run: scons platform=${{ matrix.platform }} target=template_release arch=${{ matrix.arch }} build_library=False godot_cpp_path="$GODOT_CPP_PATH" -j4
+
+      - name: Verify binaries exist
+        run: ls -la demo/addons/vortarisecs/bin/
+
+      - name: Package addon
+        shell: bash
+        run: |
+          set -e
+          rm -rf dist/_pkg && mkdir -p dist/_pkg/addons
+          cp -r demo/addons/vortarisecs dist/_pkg/addons/
+          rm -f dist/_pkg/addons/vortarisecs/bin/*.exp dist/_pkg/addons/vortarisecs/bin/*.lib
+          cp LICENSE dist/_pkg/addons/vortarisecs/LICENSE
+          python -c "
+          import zipfile, os
+          src = r'dist/_pkg/addons'
+          dst = f'dist/vortarisecs-${{ github.ref_name }}-${{ matrix.pkg }}.zip'
+          with zipfile.ZipFile(dst, 'w', zipfile.ZIP_DEFLATED) as z:
+              for root, _, files in os.walk(src):
+                  for f in files:
+                      full = os.path.join(root, f)
+                      z.write(full, os.path.join('addons', os.path.relpath(full, src)))
+          print('packaged', dst)
+          "
+          ls -la dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vortarisecs-${{ matrix.pkg }}
+          path: dist/vortarisecs-${{ github.ref_name }}-${{ matrix.pkg }}.zip
+          if-no-files-found: error
+
+  release:
+    name: Attach to GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: List artifacts
+        run: ls -la dist/
+      - name: Upload to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release upload "$TAG" dist/*.zip --repo "$REPO" --clobber
+          echo "Uploaded release assets for $TAG"

@@ -63,8 +63,13 @@ if env["target"] in ["editor", "template_debug"]:
         doc_data = env.GodotCPPDocData("src/gen/doc_data.gen.cpp", source=doc_xml)
         sources = sources + [doc_data]
 
+# godot-cpp v10 names the platform 'linux'; Godot's .gdextension key and the
+# add-on layout use 'linuxbsd'. Normalize so the artifact matches the package
+# (windows/macos are unchanged).
+out_platform = "linuxbsd" if env["platform"] == "linux" else env["platform"]
 library = env.SharedLibrary(
-    "demo/addons/vortarisecs/bin/vortarisecs{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
+    "demo/addons/vortarisecs/bin/vortarisecs.{}.{}.{}{}".format(
+        out_platform, env["target"], env["arch"], env["SHLIBSUFFIX"]),
     source=sources,
 )
 
