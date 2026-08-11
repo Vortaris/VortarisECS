@@ -63,6 +63,10 @@ if env["target"] in ["editor", "template_debug"]:
         doc_data = env.GodotCPPDocData("src/gen/doc_data.gen.cpp", source=doc_xml)
         sources = sources + [doc_data]
 
+# SCons prefixes shared libraries with 'lib' on Unix. The .gdextension
+# references unprefixed file names, so strip the prefix on every platform.
+env["SHLIBPREFIX"] = ""
+
 # godot-cpp v10 names the platform 'linux'; Godot's .gdextension key and the
 # add-on layout use 'linuxbsd'. Normalize so the artifact matches the package
 # (windows/macos are unchanged).
