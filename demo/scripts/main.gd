@@ -371,18 +371,61 @@ func _save_cli_snapshot(path: String) -> bool:
 	var save: Dictionary = world.serialize_snapshot_json()
 	var text: String = JSON.stringify(save, "\t")
 	var resolved := _resolve_cli_path(path)
+	if not _ensure_snapshot_parent_dir(resolved):
+		printerr("[vortarisecs] snapshot write failed (cannot create parent dir): ", resolved)
+		return false
 	var f := FileAccess.open(resolved, FileAccess.WRITE)
 	if f == null:
 		printerr("[vortarisecs] snapshot write failed: ", resolved)
 		return false
 	f.store_string(text)
 	f.close()
-	print("[vortarisecs] snapshot saved to ", resolved, " (", text.length(), " bytes, ", world.entity_count(), " entities)")
+	# text.length() is UTF-16 code units; store_string writes UTF-8, so report
+	# the actual on-disk byte count.
+	print("[vortarisecs] snapshot saved to ", resolved, " (", text.to_utf8_buffer().size(), " bytes, ", world.entity_count(), " entities)")
+	return true
+
+
+func _ensure_snapshot_parent_dir(path: String) -> bool:
+	# res:// is read-only after export, so directory creation there is skipped
+	# (the subsequent FileAccess.open will fail cleanly instead).
+	if path.begins_with("res://"):
+		return true
+	var base: String = path.get_base_dir()
+	if base.is_empty() or base == "." or base == "/" or base == "\\":
+		return true
+	if base.begins_with("res://"):
+		return true
+	if base.begins_with("user://"):
+		# DirAccess.make_dir_recursive is an instance method; open the user data
+		# root and create the sub-directory relative to it.
+		var dir := DirAccess.open("user://")
+		if dir == null:
+			printerr("[vortarisecs] cannot open user://")
+			return false
+		var rel: String = base.trim_prefix("user://")
+		if rel.is_empty():
+			return true
+		var err: Error = dir.make_dir_recursive(rel)
+		if err != OK:
+			printerr("[vortarisecs] cannot create parent directory '", base, "' (error ", err, ")")
+			return false
+		return true
+	# Absolute filesystem path (C:\..., /tmp/...).
+	var err_abs: Error = DirAccess.make_dir_recursive_absolute(base)
+	if err_abs != OK:
+		printerr("[vortarisecs] cannot create parent directory '", base, "' (error ", err_abs, ")")
+		return false
 	return true
 
 
 func _setup_cli_overlay(enabled: bool) -> void:
+	# Explicit "off" must not instantiate the overlay at all, so F2 cannot
+	# re-enable it; only "on" creates the node.
+	if not enabled:
+		print("[vortarisecs] runtime overlay off")
+		return
 	var overlay := preload("res://addons/vortarisecs/ecs_overlay.tscn").instantiate()
 	add_child(overlay)
-	overlay.set_overlay_enabled(enabled)
-	print("[vortarisecs] runtime overlay ", ("on" if enabled else "off"))
+	overlay.set_overlay_enabled(true)
+	print("[vortarisecs] runtime overlay on")

@@ -141,12 +141,17 @@ godot --headless --path demo -- --vortaris-ecs-stats
 # Save a JSON snapshot to the user data dir
 godot --headless --path demo -- --vortaris-ecs-snapshot save.json
 
-# Save to an explicit path (absolute / res:// / user:// are all accepted)
-godot --headless --path demo -- --vortaris-ecs-snapshot res://saves/save.json
+# Save into a subdirectory under the user data dir; parent directories that do
+# not exist yet are created automatically (UTF-8 byte count is reported)
+godot --headless --path demo -- --vortaris-ecs-snapshot user://saves/save.json
 
 # Launch the game with the runtime overlay ON (headless or windowed)
 godot --path demo -- --vortaris-ecs-overlay on
 ```
+
+> Snapshot paths: prefer `user://` or an absolute filesystem path — missing
+> parent directories are created automatically. `res://` is read-only after the
+> project is exported, so writing a snapshot there fails; do not use it.
 
 Sample `--vortaris-ecs-stats` output:
 

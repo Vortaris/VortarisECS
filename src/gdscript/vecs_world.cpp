@@ -724,11 +724,16 @@ bool VECSWorld::deserialize_snapshot_json(const godot::Variant &p_data) {
 		return false;
 	}
 	const godot::Array ents = root["entities"];
+	// Loading a save replaces the world, but a partial/failed load must not
+	// destroy the live world: back it up first so it can be restored.
+	const godot::String backup = godot::JSON::stringify(serialize_snapshot_json());
 	// Loading a save replaces the world: drop any existing entities first.
 	core_->clear();
 	const godot::Array spawned = spawn_from_data(ents);
 	if (spawned.size() != ents.size()) {
-		ERR_PRINT("VortarisECS: some entities failed to deserialize.");
+		ERR_PRINT("VortarisECS: some entities failed to deserialize; restoring the previous world.");
+		core_->clear();
+		deserialize_snapshot_json(backup);
 		return false;
 	}
 	vortaris::log_debug("snapshot JSON loaded (" + godot::String::num_int64(spawned.size()) + " entities)");
@@ -752,10 +757,16 @@ godot::Dictionary VECSWorld::deserialize_snapshot_json_mapped(const godot::Varia
 		return godot::Dictionary();
 	}
 	const godot::Array ents = root["entities"];
+	// Same backup-before-replace contract as deserialize_snapshot_json: a
+	// partial/failed load restores the previous world instead of leaving it
+	// cleared and half-rebuilt.
+	const godot::String backup = godot::JSON::stringify(serialize_snapshot_json());
 	core_->clear();
 	godot::Dictionary mapping = spawn_from_data_mapped(ents);
 	if (mapping.size() != ents.size()) {
-		ERR_PRINT("VortarisECS: some entities failed to deserialize.");
+		ERR_PRINT("VortarisECS: some entities failed to deserialize; restoring the previous world.");
+		core_->clear();
+		deserialize_snapshot_json(backup);
 		return godot::Dictionary();
 	}
 	vortaris::log_debug("snapshot JSON loaded with id mapping (" + godot::String::num_int64(mapping.size()) + " entities)");

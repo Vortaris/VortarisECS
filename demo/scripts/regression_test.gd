@@ -37,6 +37,7 @@ extends SceneTree
 #   T32 sync_priority delta throttle (MEDIUM ~ 0.1s)
 # 0.2.1 additions:
 #   T33 verbose logging flag (set_verbose / is_verbose + project setting)
+#   T34 failed JSON snapshot load restores the live world instead of clearing it
 
 const EcsTestUtil := preload("res://scripts/ecs_test_util.gd")
 
@@ -73,6 +74,7 @@ func _initialize() -> void:
 	_test_t31_changeview_log(t)
 	_test_t32_sync_throttle(t)
 	_test_t33_verbose_flag(t)
+	_test_t34_bad_snapshot_preserves_world(t)
 	print("total=", t.total, " failures=", t.failures)
 	if t.failures == 0:
 		print("=== VortarisECS Regression OK ===")
@@ -910,6 +912,9 @@ func _test_t32_sync_throttle(t: RefCounted) -> void:
 # T33: verbose logging flag — VECS.set_verbose / is_verbose and the
 # vortarisecs/verbose project setting they write.
 func _test_t33_verbose_flag(t: RefCounted) -> void:
+	if not OS.is_debug_build():
+		print("skip T33 (release build)")
+		return
 	print("-- T33: verbose logging flag --")
 	var w: VECSWorld = VECS.get_world()
 	t.expect_eq(w.is_verbose(), false, "T33: verbose off by default")
@@ -919,3 +924,54 @@ func _test_t33_verbose_flag(t: RefCounted) -> void:
 	w.set_verbose(false)
 	t.expect_eq(w.is_verbose(), false, "T33: set_verbose(false) disables verbose")
 	t.expect_eq(bool(ProjectSettings.get_setting("vortarisecs/verbose", false)), false, "T33: project setting reset")
+
+
+# T34: loading a partially-broken snapshot must NOT clear the live world. A save
+# with 1 good + 1 bad (unregistered component) entity fails the load, and the
+# previous world has to be fully restored — not left cleared and half-rebuilt.
+func _test_t34_bad_snapshot_preserves_world(t: RefCounted) -> void:
+	print("-- T34: failed JSON load preserves the live world --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T34C", [{"name": "v", "type": "I32"}])
+	var e1: VECSEntity = w.create_entity()
+	e1.add_component("T34C", {"v": 10})
+	var e2: VECSEntity = w.create_entity()
+	e2.add_component("T34C", {"v": 20})
+	t.expect_eq(w.entity_count(), 2, "T34: baseline world has 2 entities")
+
+	var live_save: Dictionary = w.serialize_snapshot_json()
+	# 1 good entity (registered component) + 1 bad entity (unregistered
+	# component). spawn_from_data skips the bad one, so the load must fail.
+	var bad_save: Dictionary = {
+		"version": live_save["version"],
+		"entities": [
+			{"components": {"T34C": {"v": 99}}},
+			{"components": {"DoesNotExist": {"x": 1.0}}},
+		],
+	}
+	var ok: bool = w.deserialize_snapshot_json(JSON.stringify(bad_save))
+	t.expect_eq(ok, false, "T34: corrupt save rejected (returns false)")
+
+	# The live world must be fully restored: same count, ids, and values.
+	t.expect_eq(w.entity_count(), 2, "T34: live world preserved (entity_count)")
+	var ids := {}
+	var q: Array = w.query().with_all(["T34C"]).execute()
+	for ent in q:
+		ids[ent.get_id()] = int(ent.get_component("T34C").get_field("v"))
+	t.expect_eq(q.size(), 2, "T34: both original entities still alive")
+	t.expect_eq(ids[e1.get_id()], 10, "T34: e1 value preserved")
+	t.expect_eq(ids[e2.get_id()], 20, "T34: e2 value preserved")
+
+	# The mapped variant follows the same contract: empty mapping on failure and
+	# the previous world restored.
+	var w2: VECSWorld = VECSWorld.new()
+	w2.register_component("T34C", [{"name": "v", "type": "I32"}])
+	var m: VECSEntity = w2.create_entity()
+	m.add_component("T34C", {"v": 7})
+	var mapping: Dictionary = w2.deserialize_snapshot_json_mapped(JSON.stringify(bad_save))
+	t.expect_eq(mapping.size(), 0, "T34: mapped corrupt load returns empty mapping")
+	t.expect_eq(w2.entity_count(), 1, "T34: mapped corrupt load preserved the live world")
+	t.expect_eq(int(w2.entity(m.get_id()).get_component("T34C").get_field("v")), 7, "T34: mapped world value preserved")
+
+	w.free()
+	w2.free()

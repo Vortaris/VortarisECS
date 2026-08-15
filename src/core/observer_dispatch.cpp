@@ -28,14 +28,18 @@ uint32_t event_bit(ObserverEventType p_type) {
 
 ObserverId ObserverDispatch::add(ObserverCallback p_cb) {
 	p_cb.id = next_id_++;
+	// Capture the fields the log/return read AFTER the move; p_cb is moved-from
+	// below, so reading its members afterwards would be undefined behavior.
+	const ObserverId id = p_cb.id;
+	const uint32_t mask = p_cb.event_mask;
 	// COW: snapshot, mutate a copy, publish a fresh immutable vector.
 	std::vector<ObserverCallback> copy = callbacks_ ? *callbacks_ : std::vector<ObserverCallback>();
 	copy.push_back(std::move(p_cb));
 	callbacks_ = std::make_shared<const std::vector<ObserverCallback>>(std::move(copy));
 	if (verbose_active()) {
-		log_verbose("observer registered id=" + godot::String::num_int64(p_cb.id) + " mask=" + godot::String::num_int64(p_cb.event_mask));
+		log_verbose("observer registered id=" + godot::String::num_int64(id) + " mask=" + godot::String::num_int64(mask));
 	}
-	return p_cb.id;
+	return id;
 }
 
 void ObserverDispatch::clear() {

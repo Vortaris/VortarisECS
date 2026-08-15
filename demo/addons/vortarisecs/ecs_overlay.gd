@@ -27,6 +27,7 @@ const TOGGLE_KEY := Key.KEY_F2
 var _world: VECSWorld = null
 var _enabled := false
 var _refresh_timer := 0.0
+var _last_browser_count := -1
 
 var _panel: PanelContainer = null
 var _stats_label: Label = null
@@ -171,6 +172,14 @@ func _refresh_stats() -> void:
 		stats.get("query_cache_entries", 0),
 		q.get_last_execution_time_usec(),
 	]
+	# Keep the entity browser from going stale: when the entity count changes
+	# (an entity was created or destroyed since the last periodic refresh),
+	# rebuild the tree automatically. The count only captures structural
+	# changes, so manual Refresh / F2 still work for deeper inspection.
+	var count: int = int(stats.get("entity_count", 0))
+	if count != _last_browser_count:
+		_last_browser_count = count
+		_refresh_browser()
 
 
 func _refresh_browser() -> void:
@@ -208,7 +217,7 @@ func _export_snapshot() -> void:
 		return
 	f.store_string(text)
 	f.close()
-	_set_status("snapshot exported to %s (%d bytes)" % [SNAPSHOT_PATH, text.length()])
+	_set_status("snapshot exported to %s (%d bytes)" % [SNAPSHOT_PATH, text.to_utf8_buffer().size()])
 
 
 func _import_snapshot() -> void:
