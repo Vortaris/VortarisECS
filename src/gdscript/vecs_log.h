@@ -24,7 +24,19 @@ namespace vortaris {
 //   if (vortaris::verbose_active()) {
 //       vortaris::log_verbose("...");
 //   }
-bool verbose_active();
+//
+// The cache is an inline variable so verbose_active() is a true single-load
+// check (no function-call overhead) even from translation units that include
+// this header — the hot path is never perturbed.
+inline bool g_verbose_active = false;
+
+inline bool verbose_active() {
+#ifdef DEBUG_ENABLED
+	return g_verbose_active;
+#else
+	return false;
+#endif
+}
 
 // Sets the cached verbose flag AND the `vortarisecs/verbose` project setting
 // so the runtime toggle and the persisted setting stay in sync. No-op in
