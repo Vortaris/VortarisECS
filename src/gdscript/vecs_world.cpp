@@ -24,6 +24,7 @@
 VECSWorld::VECSWorld() :
 		core_(new vortaris::World()),
 		scheduler_(new vortaris::SystemScheduler()) {
+	vortaris::log_debug("world created");
 }
 
 godot::Ref<VECSEntity> VECSWorld::create_entity() {
