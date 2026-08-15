@@ -3,14 +3,17 @@
 #include <gdextension_interface.h>
 
 #include <godot_cpp/classes/engine.hpp>
+#include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/godot.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 
 #include "demo/systems.h"
 #include "gdscript/vecs_command_buffer.h"
 #include "gdscript/vecs_component.h"
 #include "gdscript/vecs_component_type.h"
 #include "gdscript/vecs_entity.h"
+#include "gdscript/vecs_log.h"
 #include "gdscript/vecs_observer.h"
 #include "gdscript/vecs_query_builder.h"
 #include "gdscript/vecs_system.h"
@@ -45,6 +48,19 @@ void initialize_vortarisecs_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(VECSNetworkSync);
 
 	vortaris_demo_register_components();
+
+	// Register the verbose-logging project setting so it shows up in the editor
+	// (Project Settings) and survives into exported builds. Seeded from
+	// project.godot if the user already set it; refresh_verbose() picks it up.
+	if (!ProjectSettings::get_singleton()->has_setting("vortarisecs/verbose")) {
+		ProjectSettings::get_singleton()->set_setting("vortarisecs/verbose", false);
+	}
+	ProjectSettings::get_singleton()->set_initial_value("vortarisecs/verbose", false);
+	godot::Dictionary verbose_hint;
+	verbose_hint["name"] = "vortarisecs/verbose";
+	verbose_hint["type"] = godot::Variant::BOOL;
+	ProjectSettings::get_singleton()->add_property_info(verbose_hint);
+	vortaris::refresh_verbose();
 
 	g_vecs_singleton = memnew(VECSWorld);
 	Engine::get_singleton()->register_singleton("VECS", g_vecs_singleton);

@@ -366,6 +366,14 @@
 				把整个世界序列化为可 JSON 化的 [Dictionary]：[code]{"version": int, "entities": [...]}[/code]。把它传给 [method JSON.stringify] 即可写出存档文件。
 			</description>
 		</method>
+		<method name="is_verbose" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] when detailed verbose logging is active for this process (debug build AND the [code]vortarisecs/verbose[/code] project setting). In release builds this always returns [code]false[/code].
+
+				返回当前进程是否启用了详细 verbose 日志（debug 构建且 [code]vortarisecs/verbose[/code] 项目设置为真）。release 构建恒返回 [code]false[/code]。
+			</description>
+		</method>
 		<method name="set_entity_range">
 			<return type="void" />
 			<param index="0" name="base" type="int" />
@@ -385,6 +393,15 @@
 				Convenience sugar for [method VECSEntity.setf]: writes a single field of a component on [param entity] and marks it changed. No-op if the component or field does not exist.
 
 				[method VECSEntity.setf] 的便捷语法：写入 [param entity] 上某个组件的单个字段并标记为已变更。若组件或字段不存在则为空操作。
+			</description>
+		</method>
+		<method name="set_verbose">
+			<return type="void" />
+			<param index="0" name="on" type="bool" />
+			<description>
+				Enables or disables detailed verbose logging for this process. Also writes the [code]vortarisecs/verbose[/code] project setting so the runtime toggle and the persisted setting stay in sync. Verbose logs are only emitted in debug builds; in release builds this is a no-op. See also [method is_verbose].
+
+				开启或关闭当前进程的详细 verbose 日志，同时写入 [code]vortarisecs/verbose[/code] 项目设置，使运行时开关与持久化设置保持一致。verbose 日志仅在 debug 构建中输出；release 构建中此方法为空操作。另见 [method is_verbose]。
 			</description>
 		</method>
 		<method name="shutdown">

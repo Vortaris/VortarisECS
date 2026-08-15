@@ -11,6 +11,7 @@
 #include "../core/component_registry.h"
 #include "../core/world.h"
 #include "vecs_entity.h"
+#include "vecs_log.h"
 
 godot::Ref<VECSQueryBuilder> VECSQueryBuilder::make(vortaris::World *p_world) {
 	godot::Ref<VECSQueryBuilder> ref;
@@ -183,6 +184,10 @@ godot::Array VECSQueryBuilder::execute() {
 		world_->set_changed_baseline(key, world_->change_tick());
 	}
 	last_exec_usec_ = static_cast<int64_t>(godot::Time::get_singleton()->get_ticks_usec() - t0);
+	if (vortaris::verbose_active()) {
+		vortaris::log_verbose("query executed (" + godot::String::num_int64(result.size()) + " results, " +
+				godot::String::num_int64(last_exec_usec_) + " usec, changed_filter=" + (has_changed_filter ? godot::String("yes") : godot::String("no")) + ")");
+	}
 	return result;
 }
 

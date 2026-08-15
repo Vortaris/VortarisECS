@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "../gdscript/vecs_log.h"
+
 namespace vortaris {
 
 namespace {
@@ -30,6 +32,9 @@ ObserverId ObserverDispatch::add(ObserverCallback p_cb) {
 	std::vector<ObserverCallback> copy = callbacks_ ? *callbacks_ : std::vector<ObserverCallback>();
 	copy.push_back(std::move(p_cb));
 	callbacks_ = std::make_shared<const std::vector<ObserverCallback>>(std::move(copy));
+	if (verbose_active()) {
+		log_verbose("observer registered id=" + godot::String::num_int64(p_cb.id) + " mask=" + godot::String::num_int64(p_cb.event_mask));
+	}
 	return p_cb.id;
 }
 
@@ -50,6 +55,9 @@ void ObserverDispatch::remove(ObserverId p_id) {
 	}
 	copy.erase(it, copy.end());
 	callbacks_ = std::make_shared<const std::vector<ObserverCallback>>(std::move(copy));
+	if (verbose_active()) {
+		log_verbose("observer removed id=" + godot::String::num_int64(p_id));
+	}
 }
 
 int ObserverDispatch::dispatch(ObserverEventType p_type, Entity p_e, ComponentTypeId p_comp, const godot::String &p_event_name, const godot::Variant &p_payload) {
@@ -78,6 +86,12 @@ int ObserverDispatch::dispatch(ObserverEventType p_type, Entity p_e, ComponentTy
 			cb.fn(p_type, p_e, p_comp, p_event_name, p_payload);
 			++delivered;
 		}
+	}
+	if (verbose_active()) {
+		log_verbose("observer dispatch type=" + godot::String::num_int64(static_cast<int64_t>(p_type)) +
+				" entity=" + godot::String::num_int64(static_cast<int64_t>(p_e.id)) +
+				" comp=" + godot::String::num_int64(p_comp) +
+				" delivered=" + godot::String::num_int64(delivered));
 	}
 	return delivered;
 }

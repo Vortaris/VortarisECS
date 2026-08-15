@@ -6,6 +6,7 @@
 
 #include "../core/component_registry.h"
 #include "../core/world.h"
+#include "../gdscript/vecs_log.h"
 #include "../serialization/component_serializer.h"
 #include "gdscript/vecs_world.h"
 
@@ -369,6 +370,7 @@ void VECSSnapshotReplication::tick(VECSNetworkSync &p_ns, double p_delta) {
 
 	// Spawns (delayed one tick so multi-component entities spawn complete).
 	if (!pending_spawn_.empty()) {
+		size_t spawned = 0;
 		for (vortaris::Entity e : pending_spawn_) {
 			if (!w.is_alive(e)) {
 				continue;
@@ -389,8 +391,12 @@ void VECSSnapshotReplication::tick(VECSNetworkSync &p_ns, double p_delta) {
 			buf.write_u16(ncomp);
 			buf.write_bytes(comp_buf.data(), comp_buf.size());
 			p_ns.send_packet(SyncPacketKind::Spawn, buf);
+			++spawned;
 		}
 		pending_spawn_.clear();
+		if (vortaris::verbose_active()) {
+			vortaris::log_verbose("network spawn " + godot::String::num_int64(static_cast<int64_t>(spawned)) + " entities");
+		}
 	}
 
 	// Deltas (dirty networked components). build_delta removes the components it
@@ -401,6 +407,9 @@ void VECSSnapshotReplication::tick(VECSNetworkSync &p_ns, double p_delta) {
 		build_delta(p_ns, buf);
 		if (buf.size() > 0) {
 			p_ns.send_packet(SyncPacketKind::Delta, buf);
+			if (vortaris::verbose_active()) {
+				vortaris::log_verbose("network delta packet (" + godot::String::num_int64(static_cast<int64_t>(buf.size())) + " bytes)");
+			}
 		}
 	}
 
@@ -411,6 +420,9 @@ void VECSSnapshotReplication::tick(VECSNetworkSync &p_ns, double p_delta) {
 			vortaris::BinaryBuffer buf;
 			buf.write_u64(e.id);
 			p_ns.send_packet(SyncPacketKind::Despawn, buf);
+		}
+		if (vortaris::verbose_active()) {
+			vortaris::log_verbose("network despawn " + godot::String::num_int64(static_cast<int64_t>(pending_despawn_.size())) + " entities");
 		}
 		pending_despawn_.clear();
 	}
@@ -423,6 +435,9 @@ void VECSSnapshotReplication::tick(VECSNetworkSync &p_ns, double p_delta) {
 		serialize_full_state(p_ns, buf);
 		if (buf.size() > 0) {
 			p_ns.send_packet(SyncPacketKind::FullState, buf);
+			if (vortaris::verbose_active()) {
+				vortaris::log_verbose("network full_state packet (" + godot::String::num_int64(static_cast<int64_t>(buf.size())) + " bytes)");
+			}
 		}
 	}
 }
@@ -663,6 +678,7 @@ void VECSNetworkSync::bind_world(VECSWorld *p_world) {
 		if (strategy_.is_valid()) {
 			strategy_->seed_from_world(*this);
 		}
+		vortaris::log_debug("network sync bound to world (server=" + (server_ ? godot::String("yes") : godot::String("no")) + ")");
 	}
 }
 
@@ -728,6 +744,10 @@ void VECSNetworkSync::apply_packet(SyncPacketKind p_kind, const vortaris::Binary
 		return;
 	}
 	applying_ = true;
+	if (vortaris::verbose_active()) {
+		vortaris::log_verbose("network apply packet kind=" + godot::String::num_int64(static_cast<int64_t>(p_kind)) +
+				" bytes=" + godot::String::num_int64(static_cast<int64_t>(p_data.size())));
+	}
 	switch (p_kind) {
 		case SyncPacketKind::Spawn:
 			strategy_->apply_spawn(*this, p_data);

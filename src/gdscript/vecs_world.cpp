@@ -14,6 +14,7 @@
 #include "../serialization/binary_buffer.h"
 #include "../serialization/snapshot.h"
 #include "vecs_command_buffer.h"
+#include "vecs_log.h"
 #include "vecs_component_type.h"
 #include "vecs_entity.h"
 #include "vecs_observer.h"
@@ -27,6 +28,9 @@ VECSWorld::VECSWorld() :
 
 godot::Ref<VECSEntity> VECSWorld::create_entity() {
 	vortaris::Entity e = core_->create_entity();
+	if (vortaris::verbose_active()) {
+		vortaris::log_verbose("spawn entity id=" + godot::String::num_int64(static_cast<int64_t>(e.id)));
+	}
 	return VECSEntity::make(core_.get(), e);
 }
 
@@ -39,6 +43,9 @@ godot::Ref<VECSEntity> VECSWorld::create_entity_preassigned(int64_t p_id) {
 	if (!e) {
 		ERR_PRINT("VortarisECS: create_entity_preassigned rejected id (slot out of range or already occupied).");
 		return godot::Ref<VECSEntity>();
+	}
+	if (vortaris::verbose_active()) {
+		vortaris::log_verbose("spawn preassigned entity id=" + godot::String::num_int64(static_cast<int64_t>(e.id)));
 	}
 	return VECSEntity::make(core_.get(), e);
 }
@@ -78,6 +85,9 @@ int64_t VECSWorld::pool_size() const {
 
 void VECSWorld::destroy_entity(const godot::Ref<VECSEntity> &p_entity) {
 	if (p_entity.is_valid()) {
+		if (vortaris::verbose_active()) {
+			vortaris::log_verbose("destroy entity id=" + godot::String::num_int64(static_cast<int64_t>(p_entity->entity().id)));
+		}
 		core_->destroy_entity(p_entity->entity());
 	}
 }
@@ -138,7 +148,11 @@ bool VECSWorld::register_component(const godot::String &p_name, const godot::Arr
 		fd.is_networked = (bool)d.get("networked", true);
 		fds.push_back(fd);
 	}
-	return core_->registry().register_schema_component(godot::StringName(p_name), fds) != vortaris::INVALID_COMPONENT_TYPE;
+	const vortaris::ComponentTypeId tid = core_->registry().register_schema_component(godot::StringName(p_name), fds);
+	if (tid != vortaris::INVALID_COMPONENT_TYPE) {
+		vortaris::log_debug("registered component '" + p_name + "' (" + godot::String::num_int64(fds.size()) + " fields, type_id=" + godot::String::num_int64(tid) + ")");
+	}
+	return tid != vortaris::INVALID_COMPONENT_TYPE;
 }
 
 godot::Ref<VECSComponentType> VECSWorld::get_component_type(const godot::String &p_name) {
@@ -478,6 +492,14 @@ godot::Dictionary VECSWorld::get_debug_stats() const {
 	return out;
 }
 
+void VECSWorld::set_verbose(bool p_on) {
+	vortaris::set_verbose(p_on);
+}
+
+bool VECSWorld::is_verbose() const {
+	return vortaris::verbose_active();
+}
+
 void VECSWorld::process(double p_delta, const godot::String &p_group) {
 	// Advance the global write clock so that per-frame component writes get a
 	// fresh change tick (required for .changed() queries), then run the group.
@@ -503,13 +525,16 @@ VECSWorld *VECSWorld::get_world() {
 godot::PackedByteArray VECSWorld::serialize_snapshot() const {
 	vortaris::BinaryBuffer buf;
 	core_->serialize_snapshot(buf);
+	vortaris::log_debug("snapshot serialized (" + godot::String::num_int64(static_cast<int64_t>(buf.size())) + " bytes)");
 	return buf.to_packed();
 }
 
 bool VECSWorld::deserialize_snapshot(const godot::PackedByteArray &p_data) {
 	vortaris::BinaryBuffer buf;
 	buf.from_packed(p_data);
-	return core_->deserialize_snapshot(buf);
+	const bool ok = core_->deserialize_snapshot(buf);
+	vortaris::log_debug("snapshot deserialized (" + godot::String::num_int64(static_cast<int64_t>(p_data.size())) + " bytes, ok=" + (ok ? godot::String("true") : godot::String("false")) + ")");
+	return ok;
 }
 
 bool VECSWorld::register_components(const godot::Dictionary &p_components) {
@@ -521,6 +546,7 @@ bool VECSWorld::register_components(const godot::Dictionary &p_components) {
 			return false;
 		}
 	}
+	vortaris::log_debug("batch-registered " + godot::String::num_int64(p_components.size()) + " components");
 	return true;
 }
 
@@ -655,6 +681,8 @@ godot::Dictionary VECSWorld::serialize_snapshot_json() {
 	godot::Dictionary out;
 	out["version"] = static_cast<int64_t>(vortaris::SNAPSHOT_VERSION);
 	out["entities"] = entities_to_data();
+	const godot::Array ents = out["entities"];
+	vortaris::log_debug("snapshot JSON serialized (" + godot::String::num_int64(ents.size()) + " entities)");
 	return out;
 }
 
@@ -702,6 +730,7 @@ bool VECSWorld::deserialize_snapshot_json(const godot::Variant &p_data) {
 		ERR_PRINT("VortarisECS: some entities failed to deserialize.");
 		return false;
 	}
+	vortaris::log_debug("snapshot JSON loaded (" + godot::String::num_int64(spawned.size()) + " entities)");
 	return true;
 }
 
@@ -728,6 +757,7 @@ godot::Dictionary VECSWorld::deserialize_snapshot_json_mapped(const godot::Varia
 		ERR_PRINT("VortarisECS: some entities failed to deserialize.");
 		return godot::Dictionary();
 	}
+	vortaris::log_debug("snapshot JSON loaded with id mapping (" + godot::String::num_int64(mapping.size()) + " entities)");
 	return mapping;
 }
 
@@ -782,6 +812,8 @@ void VECSWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("copy_entity_to", "entity", "target"), &VECSWorld::copy_entity_to);
 	ClassDB::bind_method(D_METHOD("merge_world", "source"), &VECSWorld::merge_world);
 	ClassDB::bind_method(D_METHOD("get_debug_stats"), &VECSWorld::get_debug_stats);
+	ClassDB::bind_method(D_METHOD("set_verbose", "on"), &VECSWorld::set_verbose);
+	ClassDB::bind_method(D_METHOD("is_verbose"), &VECSWorld::is_verbose);
 	ClassDB::bind_method(D_METHOD("process", "delta", "group"), &VECSWorld::process, DEFVAL(""));
 	ClassDB::bind_method(D_METHOD("compact"), &VECSWorld::compact);
 	ClassDB::bind_method(D_METHOD("shutdown"), &VECSWorld::shutdown);

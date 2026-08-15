@@ -6,6 +6,7 @@
 #include "../core/component_registry.h"
 #include "../core/world.h"
 #include "../reflect/type_traits.h"
+#include "vecs_log.h"
 
 godot::Ref<VECSComponent> VECSComponent::make(vortaris::World *p_world, vortaris::Entity p_entity, vortaris::ComponentTypeId p_type) {
 	godot::Ref<VECSComponent> ref;
@@ -139,6 +140,10 @@ void VECSComponent::set_field(const godot::String &p_name, const godot::Variant 
 		// Field-level change notification: the Changed event carries the field
 		// name so observers can subscribe per-field.
 		world_->mark_changed(entity_, type_id_, p_name);
+		if (vortaris::verbose_active()) {
+			vortaris::log_verbose("component write entity=" + godot::String::num_int64(static_cast<int64_t>(entity_.id)) +
+					" type=" + get_type_name() + " field=" + p_name);
+		}
 	} else {
 		ERR_PRINT("VortarisECS: set_field on component '" + get_type_name() + "' field '" + p_name + "' received an incompatible Variant type.");
 	}

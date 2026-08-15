@@ -111,8 +111,13 @@ public:
 	// {source_id: target_id} mapping. source == this clones the whole world.
 	godot::Dictionary merge_world(VECSWorld *p_source);
 
-	// ---- debug ----
+	// ---- debug / logging ----
 	godot::Dictionary get_debug_stats() const;
+	// Enables/disables detailed verbose logging for this process (also writes the
+	// `vortarisecs/verbose` project setting). Verbose logs are only emitted in
+	// debug builds; in release builds this is a no-op.
+	void set_verbose(bool p_on);
+	bool is_verbose() const;
 
 	// ---- per-frame driver ----
 	void process(double p_delta, const godot::String &p_group);
