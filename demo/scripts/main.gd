@@ -1,6 +1,16 @@
 extends Node
 
 func _ready() -> void:
+	# Parse headless CLI debug arguments (--vortaris-*) BEFORE building the
+	# world, but act on them AFTER the world is built so the stats/snapshot
+	# reflect the real game world. See docs/AI_DEBUGGING.md for the full table.
+	var cli_args := _parse_cli_args()
+	if not (cli_args["error"] as String).is_empty():
+		print("[vortarisecs] ", cli_args["error"])
+		_print_cli_usage()
+		get_tree().quit(1)
+		return
+
 	print("=== VortarisECS Demo ===")
 	var world: VECSWorld = VECS.get_world()
 	print("world class: ", world.get_class())
@@ -264,4 +274,115 @@ func _ready() -> void:
 	print("entity_count at end = ", world.entity_count())
 
 	print("=== VortarisECS Demo OK ===")
+	_handle_cli_args(cli_args)
+
+
+# ---------------------------------------------------------------- CLI ----
+# Headless / AI debugging entry points. Parse happens in _ready() (before the
+# world is built) but these actions run AFTER the demo built the world, so the
+# reported statistics reflect the real game world. Output lines are prefixed
+# with [vortarisecs] for machine readability.
+
+func _parse_cli_args() -> Dictionary:
+	var out := {
+		"stats": false,
+		"snapshot": "",
+		"overlay": "unset",
+		"error": "",
+	}
+	var user_args := OS.get_cmdline_user_args()
+	var i := 0
+	while i < user_args.size():
+		var a: String = user_args[i]
+		if a == "--vortaris-ecs-stats":
+			out["stats"] = true
+		elif a == "--vortaris-ecs-snapshot":
+			if i + 1 >= user_args.size():
+				out["error"] = "--vortaris-ecs-snapshot requires a <path> argument"
+				return out
+			out["snapshot"] = user_args[i + 1]
+			i += 1
+		elif a == "--vortaris-ecs-overlay":
+			if i + 1 >= user_args.size():
+				out["error"] = "--vortaris-ecs-overlay requires 'on' or 'off'"
+				return out
+			var val: String = user_args[i + 1]
+			if val != "on" and val != "off":
+				out["error"] = "--vortaris-ecs-overlay value must be 'on' or 'off' (got '%s')" % val
+				return out
+			out["overlay"] = val
+			i += 1
+		else:
+			out["error"] = "unknown argument: " + a
+			return out
+		i += 1
+	return out
+
+
+func _print_cli_usage() -> void:
+	print("[vortarisecs] usage:")
+	print("[vortarisecs]   godot --headless --path demo -- --vortaris-ecs-stats")
+	print("[vortarisecs]   godot --headless --path demo -- --vortaris-ecs-snapshot <path>")
+	print("[vortarisecs]   godot --headless --path demo -- --vortaris-ecs-overlay on|off")
+
+
+func _handle_cli_args(args: Dictionary) -> void:
+	if args["stats"]:
+		_print_cli_stats()
+		get_tree().quit(0)
+		return
+	if not (args["snapshot"] as String).is_empty():
+		var ok: bool = _save_cli_snapshot(args["snapshot"])
+		get_tree().quit(0 if ok else 1)
+		return
+	if args["overlay"] != "unset":
+		_setup_cli_overlay(args["overlay"] == "on")
+		return  # normal game entry: keep running (no quit)
 	get_tree().quit(0)
+
+
+func _print_cli_stats() -> void:
+	var world: VECSWorld = VECS.get_world()
+	var stats: Dictionary = world.get_debug_stats()
+	var out := {
+		"entity_count": stats.get("entity_count", 0),
+		"archetype_count": stats.get("archetype_count", 0),
+		"component_count": stats.get("component_count", 0),
+		"observer_count": stats.get("observer_count", 0),
+		"change_tick": stats.get("change_tick", 0),
+		"pool_size": stats.get("pool_size", 0),
+		"query_cache_entries": stats.get("query_cache_entries", 0),
+	}
+	print("[vortarisecs] stats ", JSON.stringify(out))
+
+
+func _resolve_cli_path(path: String) -> String:
+	if path.contains("://"):
+		return path
+	if path.begins_with("/") or path.begins_with("\\"):
+		return path
+	if path.length() >= 2 and path[1] == ":":
+		return path  # Windows drive absolute path (C:\...)
+	return "user://" + path
+
+
+func _save_cli_snapshot(path: String) -> bool:
+	var world: VECSWorld = VECS.get_world()
+	var save: Dictionary = world.serialize_snapshot_json()
+	var text: String = JSON.stringify(save, "\t")
+	var resolved := _resolve_cli_path(path)
+	var f := FileAccess.open(resolved, FileAccess.WRITE)
+	if f == null:
+		printerr("[vortarisecs] snapshot write failed: ", resolved)
+		return false
+	f.store_string(text)
+	f.close()
+	print("[vortarisecs] snapshot saved to ", resolved, " (", text.length(), " bytes, ", world.entity_count(), " entities)")
+	return true
+
+
+func _setup_cli_overlay(enabled: bool) -> void:
+	var overlay := preload("res://addons/vortarisecs/ecs_overlay.tscn").instantiate()
+	add_child(overlay)
+	overlay.set_overlay_enabled(enabled)
+	print("[vortarisecs] runtime overlay ", ("on" if enabled else "off"))

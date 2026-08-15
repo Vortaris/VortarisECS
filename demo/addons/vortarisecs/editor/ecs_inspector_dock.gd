@@ -7,6 +7,13 @@ extends VBoxContainer
 ## field tree, world stats, last query execution time, and a JSON snapshot dump.
 ## Every access guards on Engine.has_singleton("VECS") so the dock is a no-op in
 ## headless / non-editor runs where the singleton (or the plugin) is absent.
+##
+## IMPORTANT: because of process isolation, this dock can ONLY see the editor
+## process's world — which is empty. It does NOT see a world built inside a
+## running (F5) game. To debug the running game, use the runtime overlay
+## (addons/vortarisecs/ecs_overlay.gd, enabled with --vortaris-ecs-overlay on
+## or the F2 key), the headless CLI args (--vortaris-ecs-stats /
+## --vortaris-ecs-snapshot), or MCP run_script. See docs/AI_DEBUGGING.md.
 
 var _world: VECSWorld = null
 

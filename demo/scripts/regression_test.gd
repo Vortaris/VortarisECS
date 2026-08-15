@@ -35,6 +35,8 @@ extends SceneTree
 #   T30 get_debug_stats + query execution time
 #   T31 ChangeView::take() log consistency (pre-existing once, dedup)
 #   T32 sync_priority delta throttle (MEDIUM ~ 0.1s)
+# 0.2.1 additions:
+#   T33 verbose logging flag (set_verbose / is_verbose + project setting)
 
 const EcsTestUtil := preload("res://scripts/ecs_test_util.gd")
 
@@ -70,6 +72,7 @@ func _initialize() -> void:
 	_test_t30_debug_stats(t)
 	_test_t31_changeview_log(t)
 	_test_t32_sync_throttle(t)
+	_test_t33_verbose_flag(t)
 	print("total=", t.total, " failures=", t.failures)
 	if t.failures == 0:
 		print("=== VortarisECS Regression OK ===")
@@ -902,3 +905,17 @@ func _test_t32_sync_throttle(t: RefCounted) -> void:
 	c_ns.free()
 	cw.free()
 	sw.free()
+
+
+# T33: verbose logging flag — VECS.set_verbose / is_verbose and the
+# vortarisecs/verbose project setting they write.
+func _test_t33_verbose_flag(t: RefCounted) -> void:
+	print("-- T33: verbose logging flag --")
+	var w: VECSWorld = VECS.get_world()
+	t.expect_eq(w.is_verbose(), false, "T33: verbose off by default")
+	w.set_verbose(true)
+	t.expect_eq(w.is_verbose(), true, "T33: set_verbose(true) enables verbose")
+	t.expect_eq(bool(ProjectSettings.get_setting("vortarisecs/verbose", false)), true, "T33: project setting written on")
+	w.set_verbose(false)
+	t.expect_eq(w.is_verbose(), false, "T33: set_verbose(false) disables verbose")
+	t.expect_eq(bool(ProjectSettings.get_setting("vortarisecs/verbose", false)), false, "T33: project setting reset")
