@@ -27,8 +27,43 @@ godot::String VECSComponent::get_type_name() const {
 	return godot::String(world_->registry().name_of(type_id_));
 }
 
-godot::Variant VECSComponent::get_field(const godot::String &p_name) const {
+godot::Variant VECSComponent::get_field(const godot::String &p_name, const godot::Variant &p_default) const {
 	if (!is_valid()) {
+		return p_default;
+	}
+	const vortaris::ComponentSchema *schema = world_->registry().schema_of(type_id_);
+	if (!schema) {
+		return p_default;
+	}
+	const vortaris::FieldDescriptor *fd = schema->find_field(godot::StringName(p_name));
+	if (!fd) {
+		return p_default;
+	}
+	const void *raw = world_->get_raw(entity_, type_id_);
+	if (!raw) {
+		return p_default;
+	}
+	godot::Variant out;
+	if (!vortaris::field_to_variant(*fd, static_cast<const uint8_t *>(raw) + fd->offset, out)) {
+		return p_default;
+	}
+	return out;
+}
+
+int64_t VECSComponent::get_field_count(const godot::String &p_name) const {
+	if (!is_valid()) {
+		return 0;
+	}
+	const vortaris::ComponentSchema *schema = world_->registry().schema_of(type_id_);
+	if (!schema) {
+		return 0;
+	}
+	const vortaris::FieldDescriptor *fd = schema->find_field(godot::StringName(p_name));
+	return fd ? static_cast<int64_t>(fd->count) : 0;
+}
+
+godot::Variant VECSComponent::get_array_element(const godot::String &p_name, int64_t p_index) const {
+	if (!is_valid() || p_index < 0) {
 		return godot::Variant();
 	}
 	const vortaris::ComponentSchema *schema = world_->registry().schema_of(type_id_);
@@ -36,17 +71,51 @@ godot::Variant VECSComponent::get_field(const godot::String &p_name) const {
 		return godot::Variant();
 	}
 	const vortaris::FieldDescriptor *fd = schema->find_field(godot::StringName(p_name));
-	if (!fd) {
-		ERR_PRINT("VortarisECS: component '" + get_type_name() + "' has no field '" + p_name + "'.");
+	if (!fd || fd->count <= 1 || fd->type == vortaris::FieldType::StringFixed || fd->type == vortaris::FieldType::Blob) {
+		return godot::Variant();
+	}
+	if (static_cast<size_t>(p_index) >= fd->count) {
 		return godot::Variant();
 	}
 	const void *raw = world_->get_raw(entity_, type_id_);
 	if (!raw) {
 		return godot::Variant();
 	}
+	const size_t elem_size = fd->storage_size() / fd->count;
+	const uint8_t *ptr = static_cast<const uint8_t *>(raw) + fd->offset + static_cast<size_t>(p_index) * elem_size;
 	godot::Variant out;
-	vortaris::field_to_variant(*fd, static_cast<const uint8_t *>(raw) + fd->offset, out);
+	if (!vortaris::element_to_variant(static_cast<vortaris::FieldType>(fd->element_type), ptr, out)) {
+		return godot::Variant();
+	}
 	return out;
+}
+
+bool VECSComponent::set_array_element(const godot::String &p_name, int64_t p_index, const godot::Variant &p_value) {
+	if (!is_valid() || p_index < 0) {
+		return false;
+	}
+	const vortaris::ComponentSchema *schema = world_->registry().schema_of(type_id_);
+	if (!schema) {
+		return false;
+	}
+	const vortaris::FieldDescriptor *fd = schema->find_field(godot::StringName(p_name));
+	if (!fd || fd->count <= 1 || fd->type == vortaris::FieldType::StringFixed || fd->type == vortaris::FieldType::Blob) {
+		return false;
+	}
+	if (static_cast<size_t>(p_index) >= fd->count) {
+		return false;
+	}
+	void *raw = world_->get_raw(entity_, type_id_);
+	if (!raw) {
+		return false;
+	}
+	const size_t elem_size = fd->storage_size() / fd->count;
+	uint8_t *ptr = static_cast<uint8_t *>(raw) + fd->offset + static_cast<size_t>(p_index) * elem_size;
+	if (!vortaris::element_from_variant(static_cast<vortaris::FieldType>(fd->element_type), ptr, p_value)) {
+		return false;
+	}
+	world_->mark_changed(entity_, type_id_, p_name);
+	return true;
 }
 
 void VECSComponent::set_field(const godot::String &p_name, const godot::Variant &p_value) {
@@ -96,7 +165,10 @@ void VECSComponent::_bind_methods() {
 	using namespace godot;
 	ClassDB::bind_method(D_METHOD("is_valid"), &VECSComponent::is_valid);
 	ClassDB::bind_method(D_METHOD("get_type_name"), &VECSComponent::get_type_name);
-	ClassDB::bind_method(D_METHOD("get_field", "name"), &VECSComponent::get_field);
+	ClassDB::bind_method(D_METHOD("get_field", "name", "default"), &VECSComponent::get_field, DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("set_field", "name", "value"), &VECSComponent::set_field);
 	ClassDB::bind_method(D_METHOD("get_fields"), &VECSComponent::get_fields);
+	ClassDB::bind_method(D_METHOD("get_field_count", "name"), &VECSComponent::get_field_count);
+	ClassDB::bind_method(D_METHOD("get_array_element", "name", "index"), &VECSComponent::get_array_element);
+	ClassDB::bind_method(D_METHOD("set_array_element", "name", "index", "value"), &VECSComponent::set_array_element);
 }

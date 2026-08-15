@@ -18,13 +18,33 @@
 		<link title="Quickstart">https://github.com/Vortaris/VortarisECS/blob/main/docs/quickstart.md</link>
 	</tutorials>
 	<methods>
+		<method name="get_array_element" qualifiers="const">
+			<return type="Variant" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="index" type="int" />
+			<description>
+				Reads one element of a fixed-array field ([code]count &gt; 1[/code]). Returns a null [Variant] for scalar fields, out-of-range indices, or unknown fields.
+
+				读取固定数组字段（[code]count &gt; 1[/code]）的单个元素。标量字段、越界下标或未知字段返回空 [Variant]。
+			</description>
+		</method>
 		<method name="get_field" qualifiers="const">
 			<return type="Variant" />
 			<param index="0" name="name" type="String" />
+			<param index="1" name="default" type="Variant" default="null" />
 			<description>
-				Returns the value of the field [param name]. Returns [code]null[/code] if the field does not exist on this component type.
+				Returns the value of the field [param name]. Returns [param default] (a null [Variant] by default) if the field does not exist on this component type.
 
-				返回字段 [param name] 的值。若该组件类型上没有此字段则返回 [code]null[/code]。
+				返回字段 [param name] 的值。若该组件类型上没有此字段则返回 [param default]（默认是空 [Variant]）。
+			</description>
+		</method>
+		<method name="get_field_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns the fixed-array length of the field [param name]: [code]1[/code] for scalar fields, [code]&gt;1[/code] for arrays, [code]0[/code] for unknown fields.
+
+				返回字段 [param name] 的固定数组长度：标量字段为 [code]1[/code]，数组为 [code]&gt;1[/code]，未知字段为 [code]0[/code]。
 			</description>
 		</method>
 		<method name="get_fields" qualifiers="const">
@@ -49,6 +69,17 @@
 				Returns [code]true[/code] if the underlying entity is alive and still has this component.
 
 				若底层实体存活且仍拥有该组件则返回 [code]true[/code]。
+			</description>
+		</method>
+		<method name="set_array_element">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="index" type="int" />
+			<param index="2" name="value" type="Variant" />
+			<description>
+				Writes one element of a fixed-array field and marks the row changed (field-level change event). Returns [code]false[/code] for scalar fields, out-of-range indices, unknown fields, or incompatible value types.
+
+				写入固定数组字段的单个元素并标记该行已变更（字段级变更事件）。标量字段、越界下标、未知字段或不兼容的值类型返回 [code]false[/code]。
 			</description>
 		</method>
 		<method name="set_field">

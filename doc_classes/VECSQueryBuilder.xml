@@ -73,6 +73,33 @@
 				执行查询并返回第一个匹配实体（无匹配则返回空句柄）。遵守与 [method execute] 相同的过滤器，包括 [method changed]。
 			</description>
 		</method>
+		<method name="order_by">
+			<return type="VECSQueryBuilder" />
+			<param index="0" name="comp" type="String" />
+			<param index="1" name="field" type="String" />
+			<description>
+				Sorts [method execute] results ascending by the value of the field [param field] on component [param comp] (stable sort; equal values keep their previous order). [method execute_one] / [method count] are unaffected. The default order is archetype creation order, then row order.
+
+				按组件 [param comp] 上字段 [param field] 的值对 [method execute] 结果升序排序（稳定排序；相等值保持原顺序）。[method execute_one] / [method count] 不受影响。默认顺序为 archetype 创建序加行序。
+			</description>
+		</method>
+		<method name="order_by_id">
+			<return type="VECSQueryBuilder" />
+			<description>
+				Sorts [method execute] results ascending by raw entity id (stable sort). Useful for deterministic iteration order across ticks.
+
+				按原始实体 id 对 [method execute] 结果升序排序（稳定排序）。便于跨 tick 获得确定的迭代顺序。
+			</description>
+		</method>
+		<method name="where">
+			<return type="VECSQueryBuilder" />
+			<param index="0" name="predicate" type="Callable" />
+			<description>
+				Predicate filter: only entities for which [code]predicate(entity)[/code] is truthy are returned. The callable receives a [VECSEntity] and returns a bool. Applied by [method execute], [method execute_one] and [method count]. Combine with the term filters (e.g. [method with_all]) for complex selections.
+
+				谓词过滤器：只返回使 [code]predicate(entity)[/code] 为真的实体。回调接收一个 [VECSEntity] 并返回 bool。[method execute]、[method execute_one] 与 [method count] 都会应用。可与条件过滤器（如 [method with_all]）组合进行复杂选择。
+			</description>
+		</method>
 		<method name="with_all">
 			<return type="VECSQueryBuilder" />
 			<param index="0" name="names" type="Array" />

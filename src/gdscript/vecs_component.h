@@ -25,9 +25,14 @@ public:
 
 	bool is_valid() const;
 	godot::String get_type_name() const;
-	godot::Variant get_field(const godot::String &p_name) const;
+	godot::Variant get_field(const godot::String &p_name, const godot::Variant &p_default = godot::Variant()) const;
 	void set_field(const godot::String &p_name, const godot::Variant &p_value);
 	godot::Dictionary get_fields() const;
+	// Fixed-array field convenience. The field is stored as a Godot Array when
+	// count > 1; these helpers read/write a single element.
+	int64_t get_field_count(const godot::String &p_name) const;
+	godot::Variant get_array_element(const godot::String &p_name, int64_t p_index) const;
+	bool set_array_element(const godot::String &p_name, int64_t p_index, const godot::Variant &p_value);
 
 protected:
 	static void _bind_methods();

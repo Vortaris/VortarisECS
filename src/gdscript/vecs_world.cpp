@@ -179,17 +179,22 @@ void VECSWorld::each(const godot::Array &p_components, const godot::Callable &p_
 	core_->end_iteration();
 }
 
-godot::Variant VECSWorld::get_field(const godot::Ref<VECSEntity> &p_entity, const godot::String &p_comp, const godot::String &p_field) {
+godot::Variant VECSWorld::get_field(const godot::Ref<VECSEntity> &p_entity, const godot::String &p_comp, const godot::String &p_field, const godot::Variant &p_default) {
 	if (p_entity.is_valid()) {
-		return p_entity->getf(p_comp, p_field);
+		return p_entity->getf(p_comp, p_field, p_default);
 	}
-	return godot::Variant();
+	return p_default;
 }
 
 void VECSWorld::set_field(const godot::Ref<VECSEntity> &p_entity, const godot::String &p_comp, const godot::String &p_field, const godot::Variant &p_value) {
 	if (p_entity.is_valid()) {
 		p_entity->setf(p_comp, p_field, p_value);
 	}
+}
+
+godot::Ref<VECSEntity> VECSWorld::find_by_components(const godot::Array &p_components) {
+	godot::Ref<VECSQueryBuilder> q = query();
+	return q->with_all(p_components)->execute_one();
 }
 
 void VECSWorld::add_system(VECSSystem *p_system) {
@@ -300,6 +305,17 @@ bool VECSWorld::register_components(const godot::Dictionary &p_components) {
 }
 
 godot::Array VECSWorld::spawn_from_data(const godot::Array &p_entities) {
+	godot::Dictionary ignored;
+	return _spawn_from_data_impl(p_entities, ignored);
+}
+
+godot::Dictionary VECSWorld::spawn_from_data_mapped(const godot::Array &p_entities) {
+	godot::Dictionary mapping;
+	_spawn_from_data_impl(p_entities, mapping);
+	return mapping;
+}
+
+godot::Array VECSWorld::_spawn_from_data_impl(const godot::Array &p_entities, godot::Dictionary &r_mapping) {
 	godot::Array out;
 	for (int i = 0; i < p_entities.size(); ++i) {
 		if (p_entities[i].get_type() != godot::Variant::DICTIONARY) {
@@ -308,7 +324,8 @@ godot::Array VECSWorld::spawn_from_data(const godot::Array &p_entities) {
 		}
 		const godot::Dictionary edata = p_entities[i];
 		godot::Ref<VECSEntity> ent;
-		if (edata.has("id")) {
+		const bool has_id = edata.has("id");
+		if (has_id) {
 			const int64_t id = edata["id"];
 			ent = create_entity_preassigned(id);
 		} else {
@@ -341,6 +358,13 @@ godot::Array VECSWorld::spawn_from_data(const godot::Array &p_entities) {
 				const godot::Dictionary fields = comps[cname];
 				ent->add_component(cname, fields);
 			}
+		}
+		// Map the source key (explicit id, or array index) to the new entity id.
+		const int64_t new_id = static_cast<int64_t>(ent->entity().id);
+		if (has_id) {
+			r_mapping[edata["id"]] = new_id;
+		} else {
+			r_mapping[static_cast<int64_t>(i)] = new_id;
 		}
 		out.append(ent);
 	}
@@ -383,19 +407,28 @@ godot::Dictionary VECSWorld::serialize_snapshot_json() {
 	return out;
 }
 
-bool VECSWorld::deserialize_snapshot_json(const godot::Variant &p_data) {
-	godot::Dictionary root;
+namespace {
+bool parse_snapshot_root(const godot::Variant &p_data, godot::Dictionary &r_root) {
 	if (p_data.get_type() == godot::Variant::STRING) {
 		const godot::Variant parsed = godot::JSON::parse_string(p_data);
 		if (parsed.get_type() != godot::Variant::DICTIONARY) {
 			ERR_PRINT("VortarisECS: invalid JSON save data.");
 			return false;
 		}
-		root = parsed;
+		r_root = parsed;
 	} else if (p_data.get_type() == godot::Variant::DICTIONARY) {
-		root = p_data;
+		r_root = p_data;
 	} else {
 		ERR_PRINT("VortarisECS: deserialize_snapshot_json expects a Dictionary or a JSON String.");
+		return false;
+	}
+	return true;
+}
+} // namespace
+
+bool VECSWorld::deserialize_snapshot_json(const godot::Variant &p_data) {
+	godot::Dictionary root;
+	if (!parse_snapshot_root(p_data, root)) {
 		return false;
 	}
 
@@ -421,6 +454,48 @@ bool VECSWorld::deserialize_snapshot_json(const godot::Variant &p_data) {
 	return true;
 }
 
+godot::Dictionary VECSWorld::deserialize_snapshot_json_mapped(const godot::Variant &p_data) {
+	godot::Dictionary root;
+	if (!parse_snapshot_root(p_data, root)) {
+		return godot::Dictionary();
+	}
+	if (root.has("version")) {
+		const int64_t v = root["version"];
+		if (v != static_cast<int64_t>(vortaris::SNAPSHOT_VERSION)) {
+			ERR_PRINT("VortarisECS: save version mismatch (got " + godot::String::num_int64(v) + ", expected " + godot::String::num_int64(vortaris::SNAPSHOT_VERSION) + ").");
+			return godot::Dictionary();
+		}
+	}
+	if (!root.has("entities")) {
+		ERR_PRINT("VortarisECS: save data has no 'entities'.");
+		return godot::Dictionary();
+	}
+	const godot::Array ents = root["entities"];
+	core_->clear();
+	godot::Dictionary mapping = spawn_from_data_mapped(ents);
+	if (mapping.size() != ents.size()) {
+		ERR_PRINT("VortarisECS: some entities failed to deserialize.");
+		return godot::Dictionary();
+	}
+	return mapping;
+}
+
+void VECSWorld::remap_reference(const godot::Ref<VECSEntity> &p_entity, const godot::String &p_comp, const godot::String &p_field, const godot::Dictionary &p_map) {
+	if (!p_entity.is_valid()) {
+		return;
+	}
+	const godot::Variant current = p_entity->getf(p_comp, p_field, godot::Variant());
+	if (current.get_type() != godot::Variant::INT && current.get_type() != godot::Variant::FLOAT) {
+		return; // not a numeric entity-reference field
+	}
+	const int64_t src = static_cast<int64_t>(current);
+	if (!p_map.has(src)) {
+		return; // no mapping for this source id
+	}
+	const int64_t dst = p_map[src];
+	p_entity->setf(p_comp, p_field, dst);
+}
+
 void VECSWorld::_bind_methods() {
 	using namespace godot;
 	ClassDB::bind_method(D_METHOD("create_entity"), &VECSWorld::create_entity);
@@ -437,8 +512,9 @@ void VECSWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("commands"), &VECSWorld::commands);
 	ClassDB::bind_method(D_METHOD("spawn", "components"), &VECSWorld::spawn);
 	ClassDB::bind_method(D_METHOD("each", "components", "callable"), &VECSWorld::each);
-	ClassDB::bind_method(D_METHOD("get_field", "entity", "comp", "field"), &VECSWorld::get_field);
+	ClassDB::bind_method(D_METHOD("get_field", "entity", "comp", "field", "default"), &VECSWorld::get_field, DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("set_field", "entity", "comp", "field", "value"), &VECSWorld::set_field);
+	ClassDB::bind_method(D_METHOD("find_by_components", "components"), &VECSWorld::find_by_components);
 	ClassDB::bind_method(D_METHOD("add_system", "system"), &VECSWorld::add_system);
 	ClassDB::bind_method(D_METHOD("remove_system", "system"), &VECSWorld::remove_system);
 	ClassDB::bind_method(D_METHOD("system_count"), &VECSWorld::system_count);
@@ -453,7 +529,10 @@ void VECSWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("deserialize_snapshot", "data"), &VECSWorld::deserialize_snapshot);
 	ClassDB::bind_method(D_METHOD("register_components", "components"), &VECSWorld::register_components);
 	ClassDB::bind_method(D_METHOD("spawn_from_data", "entities"), &VECSWorld::spawn_from_data);
+	ClassDB::bind_method(D_METHOD("spawn_from_data_mapped", "entities"), &VECSWorld::spawn_from_data_mapped);
 	ClassDB::bind_method(D_METHOD("entities_to_data"), &VECSWorld::entities_to_data);
 	ClassDB::bind_method(D_METHOD("serialize_snapshot_json"), &VECSWorld::serialize_snapshot_json);
 	ClassDB::bind_method(D_METHOD("deserialize_snapshot_json", "data"), &VECSWorld::deserialize_snapshot_json);
+	ClassDB::bind_method(D_METHOD("deserialize_snapshot_json_mapped", "data"), &VECSWorld::deserialize_snapshot_json_mapped);
+	ClassDB::bind_method(D_METHOD("remap_reference", "entity", "comp", "field", "map"), &VECSWorld::remap_reference);
 }

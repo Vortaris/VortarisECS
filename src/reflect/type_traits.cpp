@@ -235,6 +235,14 @@ bool scalar_from_variant(FieldType p_type, void *p_dst, const godot::Variant &p_
 
 } // namespace
 
+bool element_to_variant(FieldType p_type, const void *p_src, godot::Variant &r_out) {
+	return scalar_to_variant(p_type, p_src, r_out);
+}
+
+bool element_from_variant(FieldType p_type, void *p_dst, const godot::Variant &p_in) {
+	return scalar_from_variant(p_type, p_dst, p_in);
+}
+
 bool field_to_variant(const FieldDescriptor &p_fd, const void *p_src, godot::Variant &r_out) {
 	if (p_fd.type == FieldType::StringFixed) {
 		const char *buf = static_cast<const char *>(p_src);

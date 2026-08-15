@@ -37,8 +37,8 @@ public:
 	void add_component(const godot::String &p_type_name, const godot::Dictionary &p_fields);
 	void remove_component(const godot::String &p_type_name);
 	// One-call field sugar: e.getf("Position", "x") == e.get_component("Position").get_field("x").
-	// Returns a null Variant when the component/field is missing.
-	godot::Variant getf(const godot::String &p_comp, const godot::String &p_field) const;
+	// Returns `p_default` when the component/field is missing (null Variant by default).
+	godot::Variant getf(const godot::String &p_comp, const godot::String &p_field, const godot::Variant &p_default = godot::Variant()) const;
 	void setf(const godot::String &p_comp, const godot::String &p_field, const godot::Variant &p_value);
 	bool equals(const godot::Ref<VECSEntity> &p_other) const;
 	int64_t hash_value() const;

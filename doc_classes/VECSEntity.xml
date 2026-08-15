@@ -66,10 +66,11 @@
 			<return type="Variant" />
 			<param index="0" name="comp" type="String" />
 			<param index="1" name="field" type="String" />
+			<param index="2" name="default" type="Variant" default="null" />
 			<description>
-				Convenience sugar for [method get_component].get_field: reads a single field in one call. Returns [code]null[/code] if the component or field does not exist.
+				Convenience sugar for [method get_component].get_field: reads a single field in one call. Returns [param default] (a null [Variant] by default) if the component or field does not exist.
 
-				[method get_component].get_field 的便捷语法：一次调用读取单个字段。若组件或字段不存在则返回 [code]null[/code]。
+				[method get_component].get_field 的便捷语法：一次调用读取单个字段。若组件或字段不存在则返回 [param default]（默认是空 [Variant]）。
 			</description>
 		</method>
 		<method name="has_component" qualifiers="const">

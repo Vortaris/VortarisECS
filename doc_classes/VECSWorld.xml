@@ -91,6 +91,15 @@
 				载入 [method serialize_snapshot_json] 生成的 JSON 存档。接受已解析的 [Dictionary] 或 JSON [String]。加载会替换现有世界内容；未知组件跳过并告警，实体 id 保留。仅当所有实体都成功生成时才返回 [code]true[/code]。
 			</description>
 		</method>
+		<method name="deserialize_snapshot_json_mapped">
+			<return type="Dictionary" />
+			<param index="0" name="data" type="Variant" />
+			<description>
+				Like [method deserialize_snapshot_json], but returns the id mapping produced by [method spawn_from_data_mapped] ([code]{source_id_or_index: new_id}[/code]) instead of a bool. Loading replaces the world first; the mapping lets you rewrite cross-entity references with [method remap_reference]. Returns an empty [Dictionary] on malformed data.
+
+				类似 [method deserialize_snapshot_json]，但返回 [method spawn_from_data_mapped] 产生的 id 映射（[code]{source_id_or_index: new_id}[/code]）而非 bool。加载先替换世界；映射可用于 [method remap_reference] 改写跨实体引用。数据损坏返回空 [Dictionary]。
+			</description>
+		</method>
 		<method name="destroy_entity">
 			<return type="void" />
 			<param index="0" name="entity" type="VECSEntity" />
@@ -146,6 +155,15 @@
 				返回世界中存活的实体数量。
 			</description>
 		</method>
+		<method name="find_by_components">
+			<return type="VECSEntity" />
+			<param index="0" name="components" type="Array" />
+			<description>
+				Convenience sugar: returns the first entity that carries every component named in [param components], or a null handle if none match. Equivalent to [code]query().with_all(components).execute_one()[/code].
+
+				便捷语法：返回拥有 [param components] 中全部组件的第一个实体，无匹配则返回空句柄。等价于 [code]query().with_all(components).execute_one()[/code]。
+			</description>
+		</method>
 		<method name="get_component_type">
 			<return type="VECSComponentType" />
 			<param index="0" name="name" type="String" />
@@ -160,10 +178,11 @@
 			<param index="0" name="entity" type="VECSEntity" />
 			<param index="1" name="comp" type="String" />
 			<param index="2" name="field" type="String" />
+			<param index="3" name="default" type="Variant" default="null" />
 			<description>
-				Convenience sugar for [method VECSEntity.getf]: reads a single field of a component on [param entity]. Returns [code]null[/code] if the component or field does not exist.
+				Convenience sugar for [method VECSEntity.getf]: reads a single field of a component on [param entity]. Returns [param default] (a null [Variant] by default) if the component or field does not exist.
 
-				[method VECSEntity.getf] 的便捷语法：读取 [param entity] 上某个组件的单个字段。若组件或字段不存在则返回 [code]null[/code]。
+				[method VECSEntity.getf] 的便捷语法：读取 [param entity] 上某个组件的单个字段。若组件或字段不存在则返回 [param default]（默认是空 [Variant]）。
 			</description>
 		</method>
 		<method name="get_world">
@@ -227,6 +246,18 @@
 				Batch-registers several schema components at once: [code]{"Name": [{name, type, ...}, ...], ...}[/code]. Convenient for loading data tables (e.g. cards, items).
 
 				一次批量注册多个 schema 组件：[code]{"Name": [{name, type, ...}, ...], ...}[/code]。适合加载数据表（例如卡牌、物品）。
+			</description>
+		</method>
+		<method name="remap_reference">
+			<return type="void" />
+			<param index="0" name="entity" type="VECSEntity" />
+			<param index="1" name="comp" type="String" />
+			<param index="2" name="field" type="String" />
+			<param index="3" name="map" type="Dictionary" />
+			<description>
+				Rewrites a component field that stores a source entity id: reads [code]entity.comp.field[/code] as an int, looks it up in [param map] (from [method spawn_from_data_mapped] / [method deserialize_snapshot_json_mapped]), and writes the mapped new id back. No-op when the field is missing, not numeric, or not present in the map.
+
+				改写存储源实体 id 的组件字段：把 [code]entity.comp.field[/code] 当作 int 读取，在 [param map]（来自 [method spawn_from_data_mapped] / [method deserialize_snapshot_json_mapped]）中查找，并写回映射后的新 id。字段缺失、非数值或不在映射中则为空操作。
 			</description>
 		</method>
 		<method name="remove_observer">
@@ -308,6 +339,15 @@
 				Batch-creates entities from data: [code][{"id"?: int, "components": {"Name": {field: value}}}, ...][/code]. Entities that fail to spawn (e.g. an id conflict) are skipped. Returns the array of created [VECSEntity] handles.
 
 				从数据批量创建实体：[code][{"id"?: int, "components": {"Name": {field: value}}}, ...][/code]。生成失败的实体（例如 id 冲突）会被跳过。返回创建出的 [VECSEntity] 句柄数组。
+			</description>
+		</method>
+		<method name="spawn_from_data_mapped">
+			<return type="Dictionary" />
+			<param index="0" name="entities" type="Array" />
+			<description>
+				Like [method spawn_from_data], but also returns an id mapping [code]{source_id_or_index: new_id}[/code]. Entries that carry an explicit [code]id[/code] are keyed by that id; entries without one are keyed by their array index. Pass the mapping to [method remap_reference] to rewrite cross-entity references after the batch.
+
+				类似 [method spawn_from_data]，但额外返回 id 映射 [code]{source_id_or_index: new_id}[/code]。带显式 [code]id[/code] 的条目以该 id 为键；无 id 的条目以数组下标为键。把映射传给 [method remap_reference] 可在批量后改写跨实体引用。
 			</description>
 		</method>
 		<method name="system_count" qualifiers="const">

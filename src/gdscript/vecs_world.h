@@ -66,8 +66,12 @@ public:
 	// p_callable(ent) per entity WITHOUT materializing an Array.
 	void each(const godot::Array &p_components, const godot::Callable &p_callable);
 	// One-call field read/write: world.get_field(e, "Position", "x").
-	godot::Variant get_field(const godot::Ref<VECSEntity> &p_entity, const godot::String &p_comp, const godot::String &p_field);
+	// Returns `default` (null Variant by default) when the component/field is missing.
+	godot::Variant get_field(const godot::Ref<VECSEntity> &p_entity, const godot::String &p_comp, const godot::String &p_field, const godot::Variant &p_default = godot::Variant());
 	void set_field(const godot::Ref<VECSEntity> &p_entity, const godot::String &p_comp, const godot::String &p_field, const godot::Variant &p_value);
+	// Convenience: returns the first entity carrying every component in
+	// p_components, or a null handle. Equivalent to query().with_all(comps).execute_one().
+	godot::Ref<VECSEntity> find_by_components(const godot::Array &p_components);
 
 	// ---- systems ----
 	void add_system(VECSSystem *p_system);
@@ -100,17 +104,34 @@ public:
 	// Batch-creates entities from data: [{ "id"?: int, "components": { "Name": {fields...} } }, ...].
 	// Returns the created VECSEntity array (entities that failed to spawn are skipped).
 	godot::Array spawn_from_data(const godot::Array &p_entities);
+	// Like spawn_from_data, but also returns a mapping Dictionary
+	// {source_id_or_index: new_id} so callers can rewrite cross-entity references
+	// after the batch (see remap_reference). Entries that carry an "id" are keyed
+	// by that id; entries without one are keyed by their array index.
+	godot::Dictionary spawn_from_data_mapped(const godot::Array &p_entities);
 	// Exports every entity as [{ "id", "components": { "Name": {fields...} } }] (deterministic order).
 	godot::Array entities_to_data();
 	// World save as a JSON-able Dictionary: { "version", "entities": [...] }.
 	godot::Dictionary serialize_snapshot_json();
 	// Loads a world save. Accepts either a Dictionary or a JSON String (parsed with Godot's JSON).
 	bool deserialize_snapshot_json(const godot::Variant &p_data);
+	// Like deserialize_snapshot_json, but also returns the id mapping produced by
+	// spawn_from_data_mapped (see there). The save replaces the world first.
+	godot::Dictionary deserialize_snapshot_json_mapped(const godot::Variant &p_data);
+	// Rewrites a component field that stores a source entity id: reads
+	// entity.comp.field as an int, looks it up in `map` (from
+	// spawn_from_data_mapped / deserialize_snapshot_json_mapped), and writes the
+	// mapped new id back. No-op when the field is missing or not in the map.
+	void remap_reference(const godot::Ref<VECSEntity> &p_entity, const godot::String &p_comp, const godot::String &p_field, const godot::Dictionary &p_map);
 
 protected:
 	static void _bind_methods();
 
 private:
+	// Shared spawn implementation. Fills r_mapping with {source_id_or_index:
+	// new_id} and returns the array of spawned VECSEntity handles.
+	godot::Array _spawn_from_data_impl(const godot::Array &p_entities, godot::Dictionary &r_mapping);
+
 	std::unique_ptr<vortaris::World> core_;
 	std::unique_ptr<vortaris::SystemScheduler> scheduler_;
 };

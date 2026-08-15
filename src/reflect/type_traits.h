@@ -19,6 +19,12 @@ bool field_to_variant(const FieldDescriptor &p_fd, const void *p_src, godot::Var
 // the value cannot be represented by the field type.
 bool field_from_variant(const FieldDescriptor &p_fd, void *p_dst, const godot::Variant &p_in);
 
+// Element-level helpers for fixed-array fields. `p_type` is the element
+// FieldType (FieldDescriptor::element_type for count > 1). Unlike
+// field_to_variant/field_from_variant these do NOT handle StringFixed/Blob.
+bool element_to_variant(FieldType p_type, const void *p_src, godot::Variant &r_out);
+bool element_from_variant(FieldType p_type, void *p_dst, const godot::Variant &p_in);
+
 // Serializes the raw bytes of one component instance into a binary buffer.
 void component_bytes_to_variant_dict(const ComponentSchema &p_schema, const void *p_src, godot::Dictionary &r_out);
 

@@ -32,6 +32,15 @@ public:
 	godot::Ref<VECSQueryBuilder> with_none(const godot::Array &p_names);
 	godot::Ref<VECSQueryBuilder> enabled();
 	godot::Ref<VECSQueryBuilder> changed(const godot::Array &p_names);
+	// Predicate filter: only entities for which `predicate(entity)` is truthy are
+	// returned. Applied by execute / execute_one / count.
+	godot::Ref<VECSQueryBuilder> where(const godot::Callable &p_predicate);
+	// Sorts execute() results ascending by the field value of a component
+	// (stable sort). execute_one / count are unaffected. The default order is
+	// archetype creation order, then row order.
+	godot::Ref<VECSQueryBuilder> order_by(const godot::String &p_comp, const godot::String &p_field);
+	// Sorts execute() results ascending by entity id (stable sort).
+	godot::Ref<VECSQueryBuilder> order_by_id();
 
 	godot::Array execute();
 	godot::Ref<VECSEntity> execute_one();
@@ -47,6 +56,10 @@ private:
 	std::vector<vortaris::ComponentTypeId> none_;
 	std::vector<vortaris::ComponentTypeId> changed_;
 	bool enabled_only_ = false;
+	godot::Callable where_;
+	godot::String order_comp_;
+	godot::String order_field_;
+	bool order_by_id_ = false;
 
 	std::vector<vortaris::ComponentTypeId> resolve(const godot::Array &p_names) const;
 	vortaris::Query _compile_query() const;

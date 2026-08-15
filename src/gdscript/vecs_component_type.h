@@ -20,6 +20,11 @@ public:
 	int64_t get_id() const;
 	int64_t get_size() const;
 	godot::Array get_field_names() const;
+	// Fixed-array length of a field: 1 for scalars, >1 for arrays, 0 for unknown.
+	int64_t get_field_count(const godot::String &p_field) const;
+	// Type name of a field as a String ("F32", "Vector3", ...). For array fields
+	// (count > 1) returns "Array:F32" etc. Empty string for unknown fields.
+	godot::String get_field_type(const godot::String &p_field) const;
 	int64_t get_field_sync_priority(const godot::String &p_field) const;
 	bool get_field_is_networked(const godot::String &p_field) const;
 

@@ -23,6 +23,11 @@ extends SceneTree
 #   T18 observer field-level filter + change-tick throttle
 #   T19 network packet validation rejects truncated/id-conflict packets
 #   T20 shutdown resets transient state and the world stays reusable
+#   T21 get_field / getf / component.get_field default value
+#   T22 find_by_components convenience
+#   T23 array-field element access (component + component type)
+#   T24 where predicate + order_by / order_by_id
+#   T25 spawn_from_data_mapped / deserialize_snapshot_json_mapped + remap_reference
 
 const EcsTestUtil := preload("res://scripts/ecs_test_util.gd")
 
@@ -46,6 +51,11 @@ func _initialize() -> void:
 	_test_t18_observer_field_throttle(t)
 	_test_t19_network_validation(t)
 	_test_t20_shutdown(t)
+	_test_t21_field_default(t)
+	_test_t22_find_by_components(t)
+	_test_t23_array_element(t)
+	_test_t24_where_order(t)
+	_test_t25_id_mapping(t)
 	print("total=", t.total, " failures=", t.failures)
 	if t.failures == 0:
 		print("=== VortarisECS Regression OK ===")
@@ -547,4 +557,144 @@ func _test_t20_shutdown(t: RefCounted) -> void:
 	t.expect_eq(w.entity_count(), 3, "T20: world reusable after shutdown")
 	cmd.flush()  # buffer was cleared by shutdown; must be a no-op
 	t.expect_eq(e2.has_component("T20C"), false, "T20: pending command buffer cleared by shutdown")
+	w.free()
+
+
+# T21: get_field / getf / component.get_field accept a default returned when the
+# component or field is missing.
+func _test_t21_field_default(t: RefCounted) -> void:
+	print("-- T21: field default values --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T21C", [{"name": "x", "type": "F32"}])
+	var e: VECSEntity = w.create_entity()
+	t.expect_eq(float(w.get_field(e, "T21C", "x", 42.0)), 42.0, "T21: world.get_field default for missing component")
+	t.expect_eq(float(e.getf("T21C", "x", 7.0)), 7.0, "T21: entity.getf default for missing component")
+	e.add_component("T21C", {"x": 1.0})
+	t.expect_eq(float(e.getf("T21C", "x", 7.0)), 1.0, "T21: getf returns real value when present")
+	t.expect_eq(float(e.get_component("T21C").get_field("missing", 3.5)), 3.5, "T21: component.get_field default for missing field")
+	t.expect_eq(float(w.get_field(e, "T21C", "y", 99.0)), 99.0, "T21: world.get_field default for missing field")
+	w.free()
+
+
+# T22: find_by_components == query().with_all(comps).execute_one().
+func _test_t22_find_by_components(t: RefCounted) -> void:
+	print("-- T22: find_by_components --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T22A", [{"name": "v", "type": "I32"}])
+	w.register_component("T22B", [{"name": "v", "type": "I32"}])
+	w.register_component("T22C", [{"name": "v", "type": "I32"}])
+	var e1: VECSEntity = w.create_entity()
+	e1.add_component("T22A", {"v": 1})
+	var e2: VECSEntity = w.create_entity()
+	e2.add_component("T22A", {"v": 2})
+	e2.add_component("T22B", {"v": 3})
+	var found: VECSEntity = w.find_by_components(["T22A", "T22B"])
+	t.expect(found != null, "T22: find_by_components finds a match")
+	t.expect_eq(found.get_id(), e2.get_id(), "T22: returns the A+B entity")
+	t.expect_eq(w.find_by_components(["T22A", "T22C"]), null, "T22: null when no match")
+	w.free()
+
+
+# T23: fixed-array field convenience — element read/write on the component and
+# count/type metadata on the component type.
+func _test_t23_array_element(t: RefCounted) -> void:
+	print("-- T23: array field element access --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T23C", [{"name": "arr", "type": "F32", "count": 3}])
+	var e: VECSEntity = w.create_entity()
+	e.add_component("T23C", {"arr": [1.0, 2.0, 3.0]})
+	var comp: VECSComponent = e.get_component("T23C")
+	t.expect_eq(int(comp.get_field_count("arr")), 3, "T23: field count is 3 for array")
+	t.expect_eq(float(comp.get_array_element("arr", 1)), 2.0, "T23: read element 1")
+	t.expect_eq(comp.get_array_element("arr", 5), null, "T23: out-of-range read is null")
+	var ok: bool = comp.set_array_element("arr", 2, 9.0)
+	t.expect_eq(ok, true, "T23: set element ok")
+	t.expect_eq(float(comp.get_array_element("arr", 2)), 9.0, "T23: element updated")
+	t.expect_eq(comp.set_array_element("arr", 9, 1.0), false, "T23: out-of-range write false")
+	var ct: VECSComponentType = w.get_component_type("T23C")
+	t.expect_eq(int(ct.get_field_count("arr")), 3, "T23: type field count")
+	t.expect_eq(String(ct.get_field_type("arr")), "Array:F32", "T23: array field type string")
+	t.expect_eq(String(ct.get_field_type("missing")), "", "T23: unknown field type empty")
+	w.free()
+
+
+# T24: where() predicate filter (execute/count/execute_one) + order_by /
+# order_by_id sorting of execute() results.
+func _test_t24_where_order(t: RefCounted) -> void:
+	print("-- T24: where + order_by --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T24C", [{"name": "rank", "type": "I32"}])
+	for i in 5:
+		var e: VECSEntity = w.create_entity()
+		e.add_component("T24C", {"rank": 5 - i})  # ranks 5,4,3,2,1
+	var filtered: Array = w.query().with_all(["T24C"]).where(func(ent: VECSEntity) -> bool:
+		return int(ent.get_component("T24C").get_field("rank")) > 2).execute()
+	t.expect_eq(filtered.size(), 3, "T24: where filters to rank>2")
+	t.expect_eq(int(w.query().with_all(["T24C"]).where(func(ent: VECSEntity) -> bool:
+		return int(ent.get_component("T24C").get_field("rank")) > 2).count()), 3, "T24: count applies where")
+	var one: VECSEntity = w.query().with_all(["T24C"]).where(func(ent: VECSEntity) -> bool:
+		return int(ent.get_component("T24C").get_field("rank")) == 1).execute_one()
+	t.expect(one != null, "T24: execute_one applies where")
+	t.expect_eq(int(one.get_component("T24C").get_field("rank")), 1, "T24: execute_one returns the match")
+	var sorted: Array = w.query().with_all(["T24C"]).order_by("T24C", "rank").execute()
+	var ranks := []
+	for ent in sorted:
+		ranks.append(int(ent.get_component("T24C").get_field("rank")))
+	t.expect_eq(ranks, [1, 2, 3, 4, 5], "T24: order_by rank ascending")
+	var sorted_id: Array = w.query().with_all(["T24C"]).order_by_id().execute()
+	var prev: int = -1
+	var ok_order: bool = true
+	for ent in sorted_id:
+		if int(ent.get_id()) < prev:
+			ok_order = false
+		prev = int(ent.get_id())
+	t.expect_eq(ok_order, true, "T24: order_by_id ascending")
+	w.free()
+
+
+# T25: spawn_from_data_mapped / deserialize_snapshot_json_mapped id mappings and
+# remap_reference rewriting of cross-entity references.
+func _test_t25_id_mapping(t: RefCounted) -> void:
+	print("-- T25: id mapping + remap_reference --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_components({
+		"T25A": [{"name": "v", "type": "I32"}],
+		"T25B": [{"name": "target", "type": "I64"}],
+	})
+	var mapping: Dictionary = w.spawn_from_data_mapped([
+		{"id": 100, "components": {"T25A": {"v": 1}, "T25B": {"target": 200}}},
+		{"id": 200, "components": {"T25A": {"v": 2}, "T25B": {"target": 100}}},
+	])
+	t.expect_eq(mapping.size(), 2, "T25: mapping has 2 entries")
+	t.expect_eq(int(mapping[100]), 100, "T25: preassigned id preserved")
+	t.expect_eq(int(mapping[200]), 200, "T25: second preassigned id preserved")
+	w.remap_reference(w.entity(100), "T25B", "target", mapping)
+	t.expect_eq(int(w.entity(100).get_component("T25B").get_field("target")), 200, "T25: remap no-op when ids preserved")
+
+	# JSON round-trip: save has explicit ids, mapped load returns id->id.
+	# (Component registry is process-global, so no re-registration is needed.)
+	var save: Dictionary = w.serialize_snapshot_json()
+	var w3: VECSWorld = VECSWorld.new()
+	var m3: Dictionary = w3.deserialize_snapshot_json_mapped(save)
+	t.expect_eq(m3.size(), 2, "T25: deserialize_mapped returns mapping")
+	t.expect_eq(int(m3[100]), 100, "T25: json mapped id 100")
+	w3.free()
+
+	# Index-keyed spawn (no explicit id): map keys are array indices; remap
+	# rewrites a stored index reference to the freshly assigned entity id.
+	var w2: VECSWorld = VECSWorld.new()
+	var m2: Dictionary = w2.spawn_from_data_mapped([
+		{"components": {"T25A": {"v": 1}, "T25B": {"target": 0}}},
+		{"components": {"T25A": {"v": 2}, "T25B": {"target": 1}}},
+	])
+	t.expect_eq(m2.size(), 2, "T25: index-keyed mapping has 2 entries")
+	t.expect_eq(int(m2[0]), 1, "T25: index 0 maps to a new id")
+	var all: Array = w2.query().with_all(["T25A"]).execute()
+	var first: VECSEntity = all[0]
+	var second: VECSEntity = all[1]
+	w2.remap_reference(first, "T25B", "target", m2)
+	w2.remap_reference(second, "T25B", "target", m2)
+	t.expect_eq(int(first.get_component("T25B").get_field("target")), int(m2[0]), "T25: index 0 remapped to first new id")
+	t.expect_eq(int(second.get_component("T25B").get_field("target")), int(m2[1]), "T25: index 1 remapped to second new id")
+	w2.free()
 	w.free()

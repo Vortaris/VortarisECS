@@ -61,6 +61,22 @@ godot::Ref<VECSQueryBuilder> VECSQueryBuilder::changed(const godot::Array &p_nam
 	return godot::Ref<VECSQueryBuilder>(this);
 }
 
+godot::Ref<VECSQueryBuilder> VECSQueryBuilder::where(const godot::Callable &p_predicate) {
+	where_ = p_predicate;
+	return godot::Ref<VECSQueryBuilder>(this);
+}
+
+godot::Ref<VECSQueryBuilder> VECSQueryBuilder::order_by(const godot::String &p_comp, const godot::String &p_field) {
+	order_comp_ = p_comp;
+	order_field_ = p_field;
+	return godot::Ref<VECSQueryBuilder>(this);
+}
+
+godot::Ref<VECSQueryBuilder> VECSQueryBuilder::order_by_id() {
+	order_by_id_ = true;
+	return godot::Ref<VECSQueryBuilder>(this);
+}
+
 vortaris::Query VECSQueryBuilder::_compile_query() const {
 	vortaris::Query q;
 	q.all = all_;
@@ -116,6 +132,7 @@ godot::Array VECSQueryBuilder::execute() {
 		}
 	}
 
+	std::vector<vortaris::Entity> collected;
 	for (vortaris::Archetype *a : arches) {
 		for (size_t row = 0; row < a->entities.size(); ++row) {
 			if (enabled_only_ && !a->get_enabled(row)) {
@@ -133,8 +150,31 @@ godot::Array VECSQueryBuilder::execute() {
 					continue;
 				}
 			}
-			result.append(VECSEntity::make(world_, a->entities[row]));
+			const vortaris::Entity e = a->entities[row];
+			if (where_.is_valid()) {
+				const godot::Variant v = where_.call(VECSEntity::make(world_, e));
+				if (!v.booleanize()) {
+					continue;
+				}
+			}
+			collected.push_back(e);
 		}
+	}
+
+	if (order_by_id_) {
+		std::stable_sort(collected.begin(), collected.end(), [](const vortaris::Entity &a, const vortaris::Entity &b) {
+			return a.id < b.id;
+		});
+	} else if (!order_comp_.is_empty()) {
+		std::stable_sort(collected.begin(), collected.end(), [this](const vortaris::Entity &a, const vortaris::Entity &b) {
+			godot::Ref<VECSEntity> wa = VECSEntity::make(world_, a);
+			godot::Ref<VECSEntity> wb = VECSEntity::make(world_, b);
+			return wa->getf(order_comp_, order_field_) < wb->getf(order_comp_, order_field_);
+		});
+	}
+
+	for (const vortaris::Entity &e : collected) {
+		result.append(VECSEntity::make(world_, e));
 	}
 
 	if (has_changed_filter) {
@@ -184,7 +224,14 @@ godot::Ref<VECSEntity> VECSQueryBuilder::execute_one() {
 					continue;
 				}
 			}
-			result = VECSEntity::make(world_, a->entities[row]);
+			const vortaris::Entity e = a->entities[row];
+			if (where_.is_valid()) {
+				const godot::Variant v = where_.call(VECSEntity::make(world_, e));
+				if (!v.booleanize()) {
+					continue;
+				}
+			}
+			result = VECSEntity::make(world_, e);
 			break;
 		}
 		if (result.is_valid()) {
@@ -206,15 +253,20 @@ int64_t VECSQueryBuilder::count() {
 	vortaris::Query q = _compile_query();
 	const auto &arches = world_->query_cache().match(q, world_->all_archetypes());
 	int64_t n = 0;
+	const bool has_where = where_.is_valid();
 	for (vortaris::Archetype *a : arches) {
-		if (enabled_only_) {
-			for (size_t row = 0; row < a->entities.size(); ++row) {
-				if (a->get_enabled(row)) {
-					++n;
+		for (size_t row = 0; row < a->entities.size(); ++row) {
+			if (enabled_only_ && !a->get_enabled(row)) {
+				continue;
+			}
+			if (has_where) {
+				const vortaris::Entity e = a->entities[row];
+				const godot::Variant v = where_.call(VECSEntity::make(world_, e));
+				if (!v.booleanize()) {
+					continue;
 				}
 			}
-		} else {
-			n += static_cast<int64_t>(a->entities.size());
+			++n;
 		}
 	}
 	return n;
@@ -227,6 +279,9 @@ void VECSQueryBuilder::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("with_none", "names"), &VECSQueryBuilder::with_none);
 	ClassDB::bind_method(D_METHOD("enabled"), &VECSQueryBuilder::enabled);
 	ClassDB::bind_method(D_METHOD("changed", "names"), &VECSQueryBuilder::changed, DEFVAL(Array()));
+	ClassDB::bind_method(D_METHOD("where", "predicate"), &VECSQueryBuilder::where);
+	ClassDB::bind_method(D_METHOD("order_by", "comp", "field"), &VECSQueryBuilder::order_by);
+	ClassDB::bind_method(D_METHOD("order_by_id"), &VECSQueryBuilder::order_by_id);
 	ClassDB::bind_method(D_METHOD("execute"), &VECSQueryBuilder::execute);
 	ClassDB::bind_method(D_METHOD("execute_one"), &VECSQueryBuilder::execute_one);
 	ClassDB::bind_method(D_METHOD("count"), &VECSQueryBuilder::count);

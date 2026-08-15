@@ -13,6 +13,15 @@
 	<tutorials>
 	</tutorials>
 	<methods>
+		<method name="get_field_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="field" type="String" />
+			<description>
+				Returns the fixed-array length of the field [param field]: [code]1[/code] for scalar fields, [code]&gt;1[/code] for arrays, [code]0[/code] for unknown fields.
+
+				返回字段 [param field] 的固定数组长度：标量字段为 [code]1[/code]，数组为 [code]&gt;1[/code]，未知字段为 [code]0[/code]。
+			</description>
+		</method>
 		<method name="get_field_is_networked" qualifiers="const">
 			<return type="bool" />
 			<param index="0" name="field" type="String" />
@@ -28,6 +37,15 @@
 				Returns the names of every field on this component type, in declaration order.
 
 				按声明顺序返回该组件类型所有字段的名称。
+			</description>
+		</method>
+		<method name="get_field_type" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="field" type="String" />
+			<description>
+				Returns the type name of the field [param field] as a [String] ([code]"F32"[/code], [code]"Vector3"[/code], ...). Array fields ([code]count &gt; 1[/code]) return [code]"Array:&lt;type&gt;"[/code]. Returns an empty string for unknown fields.
+
+				以 [String] 返回字段 [param field] 的类型名（[code]"F32"[/code]、[code]"Vector3"[/code] 等）。数组字段（[code]count &gt; 1[/code]）返回 [code]"Array:&lt;type&gt;"[/code]。未知字段返回空字符串。
 			</description>
 		</method>
 		<method name="get_field_sync_priority" qualifiers="const">
