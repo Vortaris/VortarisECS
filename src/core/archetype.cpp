@@ -32,7 +32,7 @@ const Column &Archetype::column(ComponentTypeId p_t) const {
 	return columns[idx];
 }
 
-uint32_t Archetype::add_entity(Entity p_e, uint32_t p_change_tick) {
+uint32_t Archetype::add_entity(Entity p_e, uint64_t p_change_tick) {
 	uint32_t row = static_cast<uint32_t>(entities.size());
 	entities.push_back(p_e);
 	enabled.push_back(1);

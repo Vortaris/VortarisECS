@@ -43,6 +43,14 @@ struct PendingComponentOp {
 	std::vector<uint8_t> data;
 };
 
+// One entry in the change log: an entity whose watched component was written at
+// `tick`. ChangeView::take() consumes this incrementally to avoid re-scanning
+// every matching archetype row on each take.
+struct ChangeLogEntry {
+	Entity entity;
+	uint64_t tick = 0;
+};
+
 // The pure C++ ECS core. No Godot objects, no Variant in hot paths — systems
 // written in C++ access components through the typed templates below and only
 // the GDScript-facing wrapper (VECSWorld) ever goes through Variant.
@@ -88,6 +96,9 @@ public:
 	void add_raw(Entity p_e, ComponentTypeId p_t, const void *p_data = nullptr);
 	void remove_component(Entity p_e, ComponentTypeId p_t);
 	void mark_changed(Entity p_e, ComponentTypeId p_t);
+	// Field-level change notification: the Changed event carries the field name
+	// (as the event's `name`) so observers can subscribe per-field.
+	void mark_changed(Entity p_e, ComponentTypeId p_t, const godot::String &p_field);
 	void get_entity_component_types(Entity p_e, std::vector<ComponentTypeId> &r_out) const;
 
 	// ---- observers / events ----
@@ -111,7 +122,7 @@ public:
 	ChangeView<Comps...> changes(); // yield entities whose Comps changed since last take()
 
 	// ---- change clock ----
-	uint32_t change_tick() const { return change_tick_; }
+	uint64_t change_tick() const { return change_tick_; }
 	void advance_change_tick() { ++change_tick_; }
 
 	// ---- command buffer ----
@@ -136,6 +147,13 @@ public:
 	// entities. Archetypes and the id space are kept for reuse.
 	void clear();
 
+	// Resets transient write/deferred state so the world can be reused or shut
+	// down cleanly: drops the pending command buffer, change-tracking baselines,
+	// deferred structural ops, custom commands and the change log. Existing
+	// entities/archetypes are left intact (use clear() to drop them). Observers
+	// are detached by clearing the observer dispatch.
+	void reset();
+
 	// ---- iteration guards ----
 	// Structural changes (add/remove component, destroy entity) inside a
 	// for_each / view iteration would corrupt the archetype rows being walked;
@@ -149,8 +167,8 @@ public:
 	uint32_t cache_version() const { return cache_version_; }
 	QueryCache &query_cache() { return query_cache_; }
 	const std::vector<Archetype *> &all_archetypes() const { return archetype_list_; }
-	uint32_t changed_baseline(uint64_t p_query_signature, bool *r_existed);
-	void set_changed_baseline(uint64_t p_query_signature, uint32_t p_tick);
+	uint64_t changed_baseline(uint64_t p_query_signature, bool *r_existed);
+	void set_changed_baseline(uint64_t p_query_signature, uint64_t p_tick);
 
 	ComponentRegistry &registry() { return ComponentRegistry::instance(); }
 
@@ -179,7 +197,7 @@ private:
 	Archetype *empty_archetype_ = nullptr;
 	QueryCache query_cache_;
 	CommandBuffer command_buffer_;
-	uint32_t change_tick_ = 1;
+	uint64_t change_tick_ = 1;
 	uint32_t cache_version_ = 0;
 
 	int suppress_depth_ = 0;
@@ -191,9 +209,12 @@ private:
 	std::unordered_map<Entity, std::vector<PendingComponentOp>> pending_ops_;
 	std::unordered_set<Entity> pending_destroy_;
 
-	std::unordered_map<uint64_t, uint32_t> changed_baselines_;
+	std::unordered_map<uint64_t, uint64_t> changed_baselines_;
 	std::unordered_map<uint32_t, CustomCommandFn> custom_commands_;
 	ObserverDispatch observer_dispatch_;
+	// Write log for ChangeView::take() (see ChangeLogEntry above).
+	std::vector<ChangeLogEntry> change_log_;
+	size_t change_log_pos_ = 0;
 };
 
 namespace detail {
@@ -419,7 +440,7 @@ public:
 
 private:
 	World *world_;
-	uint32_t baseline_;
+	uint64_t baseline_;
 	std::array<ComponentTypeId, sizeof...(Comps)> ids_;
 	Query query_;
 };

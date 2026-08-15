@@ -55,6 +55,11 @@ godot::Ref<VECSComponent> VECSEntity::get_component(const godot::String &p_type_
 	if (t == vortaris::INVALID_COMPONENT_TYPE) {
 		return godot::Ref<VECSComponent>();
 	}
+	// The entity may be alive but not carry this component: return a null handle
+	// instead of a component wrapper whose is_valid() is false.
+	if (!world_->has(entity(), t)) {
+		return godot::Ref<VECSComponent>();
+	}
 	return VECSComponent::make(world_, entity(), t);
 }
 

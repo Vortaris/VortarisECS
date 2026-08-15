@@ -18,6 +18,102 @@ constexpr int RPC_MODE_ANY_PEER = 2;
 void patch_u32(vortaris::BinaryBuffer &p_buf, size_t p_pos, uint32_t p_value) {
 	p_buf.overwrite_u32(p_pos, p_value);
 }
+
+// Dry-runs a packet with a read-only cursor: checks the sync version, every
+// entity/component count, that each type id maps to a registered schema, and
+// that every component block fits in the remaining bytes. Returns false on any
+// malformed reference so the caller can drop the packet BEFORE touching the
+// world — a truncated or schema-mismatched packet must never leave a partially
+// applied state.
+bool validate_packet(const vortaris::BinaryBuffer &p_data, SyncPacketKind p_kind) {
+	vortaris::BinaryBuffer in = p_data;
+	in.seek(0);
+
+	// Despawn packets carry no version header — just the 8-byte entity id.
+	if (p_kind == SyncPacketKind::Despawn) {
+		uint64_t id;
+		if (!in.read_u64(id)) {
+			return false;
+		}
+		return in.at_end();
+	}
+
+	uint16_t version;
+	if (!in.read_u16(version) || version != SYNC_VERSION) {
+		return false;
+	}
+
+	auto consume_component = [&in](uint32_t p_type) -> bool {
+		const vortaris::ComponentSchema *s = vortaris::ComponentRegistry::instance().schema_of(p_type);
+		if (!s) {
+			return false;
+		}
+		const size_t sz = vortaris::serialized_component_size(*s);
+		if (in.pos() + sz > in.size()) {
+			return false;
+		}
+		in.seek(in.pos() + sz);
+		return true;
+	};
+
+	if (p_kind == SyncPacketKind::Spawn) {
+		uint64_t id;
+		if (!in.read_u64(id)) {
+			return false;
+		}
+		uint16_t ncomp;
+		if (!in.read_u16(ncomp)) {
+			return false;
+		}
+		for (uint16_t i = 0; i < ncomp; ++i) {
+			uint32_t t;
+			if (!in.read_u32(t) || !consume_component(t)) {
+				return false;
+			}
+		}
+		return in.at_end();
+	}
+
+	// Delta (u8 component count) and FullState (u16 component count).
+	const bool is_delta = p_kind == SyncPacketKind::Delta;
+	if (!is_delta && p_kind != SyncPacketKind::FullState) {
+		return false; // unknown kind
+	}
+	uint32_t n;
+	if (!in.read_u32(n)) {
+		return false;
+	}
+	for (uint32_t i = 0; i < n; ++i) {
+		uint64_t id;
+		if (!in.read_u64(id)) {
+			return false;
+		}
+		if (is_delta) {
+			uint8_t ncomp;
+			if (!in.read_u8(ncomp)) {
+				return false;
+			}
+			for (uint8_t j = 0; j < ncomp; ++j) {
+				uint32_t t;
+				if (!in.read_u32(t) || !consume_component(t)) {
+					return false;
+				}
+			}
+		} else {
+			uint16_t ncomp;
+			if (!in.read_u16(ncomp)) {
+				return false;
+			}
+			for (uint16_t j = 0; j < ncomp; ++j) {
+				uint32_t t;
+				if (!in.read_u32(t) || !consume_component(t)) {
+					return false;
+				}
+			}
+		}
+	}
+	return in.at_end();
+}
 } // namespace
 
 // ------------------------------------------------------------------ strategy --
@@ -554,6 +650,14 @@ void VECSNetworkSync::send_packet(SyncPacketKind p_kind, const vortaris::BinaryB
 
 void VECSNetworkSync::apply_packet(SyncPacketKind p_kind, const vortaris::BinaryBuffer &p_data) {
 	if (!world_ || strategy_.is_null()) {
+		return;
+	}
+	// Drop malformed packets before any write: a truncated / schema-mismatched
+	// packet must never leave a partially applied world behind.
+	if (!validate_packet(p_data, p_kind)) {
+		ERR_PRINT("VortarisECS: dropped a malformed network packet (kind " +
+				godot::String::num_int64(static_cast<int64_t>(p_kind)) + ", " +
+				godot::String::num_int64(static_cast<int64_t>(p_data.size())) + " bytes).");
 		return;
 	}
 	applying_ = true;

@@ -65,6 +65,39 @@ void serialize_component(const ComponentSchema &p_schema, const void *p_inst, Bi
 	}
 }
 
+size_t serialized_component_size(const ComponentSchema &p_schema) {
+	size_t total = 0;
+	for (const FieldDescriptor &fd : p_schema.fields) {
+		switch (fd.type) {
+			case FieldType::Bool:
+			case FieldType::I8:
+			case FieldType::U8:
+				total += 1;
+				break;
+			case FieldType::I16:
+			case FieldType::U16:
+				total += 2;
+				break;
+			case FieldType::I32:
+			case FieldType::U32:
+			case FieldType::F32:
+				total += 4;
+				break;
+			case FieldType::I64:
+			case FieldType::U64:
+			case FieldType::F64:
+				total += 8;
+				break;
+			default:
+				// Vector/Color/Transform/StringFixed/Blob: raw fixed-size bytes;
+				// StringFixed writes content + zero padding to storage_size.
+				total += fd.storage_size();
+				break;
+		}
+	}
+	return total;
+}
+
 bool deserialize_component(const ComponentSchema &p_schema, void *p_inst, BinaryBuffer &r_buf) {
 	uint8_t *base = static_cast<uint8_t *>(p_inst);
 	for (const FieldDescriptor &fd : p_schema.fields) {

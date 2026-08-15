@@ -62,6 +62,25 @@ godot::Array VECSObserver::get_components() const {
 	return out;
 }
 
+void VECSObserver::set_fields(const godot::Array &p_names) {
+	field_filter_.clear();
+	for (int i = 0; i < p_names.size(); ++i) {
+		field_filter_.push_back(godot::StringName(godot::String(p_names[i])));
+	}
+}
+
+godot::Array VECSObserver::get_fields() const {
+	godot::Array out;
+	for (const godot::StringName &f : field_filter_) {
+		out.append(godot::String(f));
+	}
+	return out;
+}
+
+void VECSObserver::set_throttle_tick(int64_t p_ticks) {
+	throttle_tick_ = p_ticks > 0 ? p_ticks : 0;
+}
+
 void VECSObserver::set_match_components(const godot::Array &p_names) {
 	match_query_.clear();
 	for (int i = 0; i < p_names.size(); ++i) {
@@ -121,6 +140,30 @@ void VECSObserver::handle_event(vortaris::ObserverEventType p_type, vortaris::En
 	}
 	if (ev < 0) {
 		return;
+	}
+
+	// Field-level Changed filter: when a field filter is configured, only
+	// CHANGED events whose field name is in the set are delivered. Component /
+	// custom events carry no field name and are not affected.
+	if (p_type == vortaris::ObserverEventType::Changed && !field_filter_.empty()) {
+		if (p_name.is_empty()) {
+			return; // value changed at the component level (no field info): skip
+		}
+		godot::StringName field_name(p_name);
+		if (std::find(field_filter_.begin(), field_filter_.end(), field_name) == field_filter_.end()) {
+			return; // field not subscribed
+		}
+	}
+
+	// Changed throttle: use the world's monotonic change tick as a deterministic
+	// clock. Suppress delivery when fewer than throttle_tick_ ticks have elapsed
+	// since the last delivered CHANGED event.
+	if (p_type == vortaris::ObserverEventType::Changed && throttle_tick_ > 0 && world_) {
+		const int64_t now = static_cast<int64_t>(world_->core().change_tick());
+		if (last_emit_tick_ >= 0 && now - last_emit_tick_ < throttle_tick_) {
+			return;
+		}
+		last_emit_tick_ = now;
 	}
 
 	godot::Ref<VECSEntity> entity = VECSEntity::make(world_ ? &world_->core() : nullptr, p_entity);
@@ -201,6 +244,10 @@ void VECSObserver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("on_custom"), &VECSObserver::on_custom);
 	ClassDB::bind_method(D_METHOD("set_components", "names"), &VECSObserver::set_components);
 	ClassDB::bind_method(D_METHOD("get_components"), &VECSObserver::get_components);
+	ClassDB::bind_method(D_METHOD("set_fields", "names"), &VECSObserver::set_fields);
+	ClassDB::bind_method(D_METHOD("get_fields"), &VECSObserver::get_fields);
+	ClassDB::bind_method(D_METHOD("set_throttle_tick", "ticks"), &VECSObserver::set_throttle_tick);
+	ClassDB::bind_method(D_METHOD("get_throttle_tick"), &VECSObserver::get_throttle_tick);
 	ClassDB::bind_method(D_METHOD("set_match_components", "names"), &VECSObserver::set_match_components);
 	ClassDB::bind_method(D_METHOD("get_match_components"), &VECSObserver::get_match_components);
 	ClassDB::bind_method(D_METHOD("set_custom_event_name", "name"), &VECSObserver::set_custom_event_name);

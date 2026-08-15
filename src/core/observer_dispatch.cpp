@@ -33,6 +33,11 @@ ObserverId ObserverDispatch::add(ObserverCallback p_cb) {
 	return p_cb.id;
 }
 
+void ObserverDispatch::clear() {
+	callbacks_ = nullptr;
+	next_id_ = 1;
+}
+
 void ObserverDispatch::remove(ObserverId p_id) {
 	if (!callbacks_) {
 		return;

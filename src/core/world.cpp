@@ -253,6 +253,10 @@ void World::remove_component(Entity p_e, ComponentTypeId p_t) {
 }
 
 void World::mark_changed(Entity p_e, ComponentTypeId p_t) {
+	mark_changed(p_e, p_t, godot::String());
+}
+
+void World::mark_changed(Entity p_e, ComponentTypeId p_t, const godot::String &p_field) {
 	if (!is_alive(p_e)) {
 		return;
 	}
@@ -264,7 +268,7 @@ void World::mark_changed(Entity p_e, ComponentTypeId p_t) {
 	Column &col = a->column(p_t);
 	col.ensure_versions(change_tick_);
 	col.mark_changed(it->second.row, ++change_tick_);
-	observer_dispatch_.dispatch(ObserverEventType::Changed, p_e, p_t, godot::String(), godot::Variant());
+	observer_dispatch_.dispatch(ObserverEventType::Changed, p_e, p_t, p_field, godot::Variant());
 }
 
 void World::get_entity_component_types(Entity p_e, std::vector<ComponentTypeId> &r_out) const {
@@ -398,7 +402,24 @@ void World::clear() {
 	observer_dispatch_.dispatch(ObserverEventType::Custom, Entity{}, 0, godot::String("world_cleared"), godot::Variant());
 }
 
-uint32_t World::changed_baseline(uint64_t p_query_signature, bool *r_existed) {
+void World::reset() {
+	command_buffer_.clear();
+	changed_baselines_.clear();
+	pending_ops_.clear();
+	pending_destroy_.clear();
+	deferred_entities_.clear();
+	deferred_set_.clear();
+	custom_commands_.clear();
+	change_log_.clear();
+	change_log_pos_ = 0;
+	suppress_depth_ = 0;
+	iteration_depth_ = 0;
+	pending_cache_invalidation_ = false;
+	defer_moves_ = false;
+	observer_dispatch_.clear();
+}
+
+uint64_t World::changed_baseline(uint64_t p_query_signature, bool *r_existed) {
 	auto it = changed_baselines_.find(p_query_signature);
 	if (it == changed_baselines_.end()) {
 		if (r_existed) {
@@ -412,7 +433,7 @@ uint32_t World::changed_baseline(uint64_t p_query_signature, bool *r_existed) {
 	return it->second;
 }
 
-void World::set_changed_baseline(uint64_t p_query_signature, uint32_t p_tick) {
+void World::set_changed_baseline(uint64_t p_query_signature, uint64_t p_tick) {
 	changed_baselines_[p_query_signature] = p_tick;
 }
 
@@ -462,6 +483,13 @@ void World::_free_entity_id(Entity p_e) {
 	}
 	if (slot_generations_[slot] != p_e.generation()) {
 		return; // stale handle
+	}
+	if (p_e.generation() == UINT32_MAX) {
+		// Generation wrap-around guard: this slot is permanently retired. Handles
+		// from generation UINT32_MAX become stale and the slot is never recycled,
+		// so an id collision can never alias a live entity across the wrap point.
+		slot_generations_[slot] = UINT32_MAX;
+		return;
 	}
 	slot_generations_[slot] = p_e.generation() + 1;
 	free_slots_.push_back(slot);

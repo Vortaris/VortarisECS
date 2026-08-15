@@ -49,6 +49,7 @@ public:
 	ObserverId add(ObserverCallback p_cb);
 	void remove(ObserverId p_id);
 	void dispatch(ObserverEventType p_type, Entity p_e, ComponentTypeId p_comp, const godot::String &p_event_name, const godot::Variant &p_payload);
+	void clear();
 	bool is_empty() const { return !callbacks_ || callbacks_->empty(); }
 
 private:

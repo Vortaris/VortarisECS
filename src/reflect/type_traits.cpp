@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 
+#include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/char_string.hpp>
 
@@ -272,7 +273,12 @@ bool field_to_variant(const FieldDescriptor &p_fd, const void *p_src, godot::Var
 bool field_from_variant(const FieldDescriptor &p_fd, void *p_dst, const godot::Variant &p_in) {
 	if (p_fd.type == FieldType::StringFixed) {
 		godot::String s = p_in;
-		size_t max_len = p_fd.count > 0 ? p_fd.count - 1 : 0; // keep room for NUL
+		// A zero-length StringFixed buffer holds nothing; store the empty string
+		// without writing past the (zero-sized) storage.
+		if (p_fd.count == 0) {
+			return true;
+		}
+		size_t max_len = p_fd.count - 1; // keep room for NUL
 		godot::CharString utf8 = s.utf8();
 		size_t copy = std::min<size_t>(static_cast<size_t>(utf8.length()), max_len);
 		// Never cut a multi-byte UTF-8 code point in half. If the byte just past
@@ -286,6 +292,13 @@ bool field_from_variant(const FieldDescriptor &p_fd, void *p_dst, const godot::V
 				--p;
 			}
 			copy = p;
+		}
+		if (copy < static_cast<size_t>(utf8.length())) {
+			WARN_PRINT("VortarisECS: StringFixed field truncated from " +
+					godot::String::num_uint64(static_cast<uint64_t>(utf8.length())) +
+					" to " + godot::String::num_uint64(static_cast<uint64_t>(copy)) +
+					" bytes (buffer capacity " + godot::String::num_uint64(static_cast<uint64_t>(p_fd.count)) +
+					", kept whole UTF-8 characters).");
 		}
 		std::memcpy(p_dst, src, copy);
 		static_cast<char *>(p_dst)[copy] = '\0';

@@ -62,6 +62,15 @@ public:
 	void on_custom();
 	void set_components(const godot::Array &p_names);
 	godot::Array get_components() const;
+	// Field-level Changed subscription. When non-empty, only CHANGED events whose
+	// field name is listed here are delivered; ADDED/REMOVED/MATCHED/UNMATCHED/
+	// CUSTOM are unaffected.
+	void set_fields(const godot::Array &p_names);
+	godot::Array get_fields() const;
+	// Throttles CHANGED delivery: at most one callback per `ticks` change-clock
+	// ticks (the world's monotonic change_tick). 0 disables throttling.
+	void set_throttle_tick(int64_t p_ticks);
+	int64_t get_throttle_tick() const { return throttle_tick_; }
 	void set_match_components(const godot::Array &p_names);
 	godot::Array get_match_components() const;
 	void set_custom_event_name(const godot::String &p_name);
@@ -90,6 +99,9 @@ private:
 	VECSWorld *world_ = nullptr;
 	int event_mask_ = 0;
 	std::vector<vortaris::ComponentTypeId> component_filter_;
+	std::vector<godot::StringName> field_filter_;
+	int64_t throttle_tick_ = 0;
+	int64_t last_emit_tick_ = -1;
 	std::vector<vortaris::ComponentTypeId> match_query_;
 	godot::String custom_name_;
 	int flush_mode_ = PER_CALLBACK;

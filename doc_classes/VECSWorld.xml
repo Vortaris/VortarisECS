@@ -129,6 +129,15 @@
 				把每个实体导出为 [code][{"id": int, "components": {"Name": {field: value}}}, ...][/code] 形式的字典 [Array]，顺序确定（archetype 按签名排序）。是 [method spawn_from_data] 的逆操作。大型世界请优先用二进制 [method serialize_snapshot]。
 			</description>
 		</method>
+		<method name="entity" qualifiers="const">
+			<return type="VECSEntity" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Looks up a live entity by its raw 64-bit id. Returns a null handle when [param id] is not a live entity in this world (dead, recycled, or [code]&lt;= 0[/code]).
+
+				按原始 64 位 id 查找存活实体。若 [param id] 在本世界中不是存活实体（已销毁、已回收或 [code]&lt;= 0[/code]）则返回空句柄。
+			</description>
+		</method>
 		<method name="entity_count" qualifiers="const">
 			<return type="int" />
 			<description>
@@ -163,6 +172,15 @@
 				Returns this node. Provided so systems and scripts can reach the world through a consistent accessor.
 
 				返回本节点。供系统与脚本通过一致的访问器获取世界。
+			</description>
+		</method>
+		<method name="has_entity" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns [code]true[/code] when an entity with the raw 64-bit [param id] is alive in this world. [code]false[/code] for a dead, recycled, or non-positive id.
+
+				当本世界中存在 id 为原始 64 位 [param id] 的存活实体时返回 [code]true[/code]。对已销毁、已回收或非正 id 返回 [code]false[/code]。
 			</description>
 		</method>
 		<method name="is_alive" qualifiers="const">
@@ -264,6 +282,14 @@
 				Convenience sugar for [method VECSEntity.setf]: writes a single field of a component on [param entity] and marks it changed. No-op if the component or field does not exist.
 
 				[method VECSEntity.setf] 的便捷语法：写入 [param entity] 上某个组件的单个字段并标记为已变更。若组件或字段不存在则为空操作。
+			</description>
+		</method>
+		<method name="shutdown">
+			<return type="void" />
+			<description>
+				Tears down transient state so the world can be reused or the extension can shut down cleanly: resets the core world (deferred ops, change baselines, command buffer, custom commands), clears the observer dispatch and the system scheduler. Existing entities and archetypes are preserved. Called automatically when the engine singleton is unloaded.
+
+				清理瞬态状态以便世界可复用或扩展可干净退出：重置核心世界（延迟操作、变更基线、命令缓冲、自定义命令）、清空观察者派发与系统调度器。已有实体与 archetype 保留。引擎单例卸载时自动调用。
 			</description>
 		</method>
 		<method name="spawn">

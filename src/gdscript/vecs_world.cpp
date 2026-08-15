@@ -43,6 +43,24 @@ godot::Ref<VECSEntity> VECSWorld::create_entity_preassigned(int64_t p_id) {
 	return VECSEntity::make(core_.get(), e);
 }
 
+godot::Ref<VECSEntity> VECSWorld::entity(int64_t p_id) const {
+	if (p_id <= 0) {
+		return godot::Ref<VECSEntity>();
+	}
+	vortaris::Entity e{ static_cast<uint64_t>(p_id) };
+	if (!core_->is_alive(e)) {
+		return godot::Ref<VECSEntity>();
+	}
+	return VECSEntity::make(core_.get(), e);
+}
+
+bool VECSWorld::has_entity(int64_t p_id) const {
+	if (p_id <= 0) {
+		return false;
+	}
+	return core_->is_alive(vortaris::Entity{ static_cast<uint64_t>(p_id) });
+}
+
 void VECSWorld::destroy_entity(const godot::Ref<VECSEntity> &p_entity) {
 	if (p_entity.is_valid()) {
 		core_->destroy_entity(p_entity->entity());
@@ -248,6 +266,11 @@ void VECSWorld::compact() {
 	core_->compact();
 }
 
+void VECSWorld::shutdown() {
+	core_->reset();
+	scheduler_->clear();
+}
+
 VECSWorld *VECSWorld::get_world() {
 	return this;
 }
@@ -402,6 +425,8 @@ void VECSWorld::_bind_methods() {
 	using namespace godot;
 	ClassDB::bind_method(D_METHOD("create_entity"), &VECSWorld::create_entity);
 	ClassDB::bind_method(D_METHOD("create_entity_preassigned", "id"), &VECSWorld::create_entity_preassigned);
+	ClassDB::bind_method(D_METHOD("entity", "id"), &VECSWorld::entity);
+	ClassDB::bind_method(D_METHOD("has_entity", "id"), &VECSWorld::has_entity);
 	ClassDB::bind_method(D_METHOD("destroy_entity", "entity"), &VECSWorld::destroy_entity);
 	ClassDB::bind_method(D_METHOD("is_alive", "entity"), &VECSWorld::is_alive);
 	ClassDB::bind_method(D_METHOD("entity_count"), &VECSWorld::entity_count);
@@ -422,6 +447,7 @@ void VECSWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("emit_event", "name", "entity", "payload"), &VECSWorld::emit_event, DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("process", "delta", "group"), &VECSWorld::process, DEFVAL(""));
 	ClassDB::bind_method(D_METHOD("compact"), &VECSWorld::compact);
+	ClassDB::bind_method(D_METHOD("shutdown"), &VECSWorld::shutdown);
 	ClassDB::bind_method(D_METHOD("get_world"), &VECSWorld::get_world);
 	ClassDB::bind_method(D_METHOD("serialize_snapshot"), &VECSWorld::serialize_snapshot);
 	ClassDB::bind_method(D_METHOD("deserialize_snapshot", "data"), &VECSWorld::deserialize_snapshot);

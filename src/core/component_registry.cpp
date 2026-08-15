@@ -105,8 +105,12 @@ size_t field_type_align(FieldType p_t) {
 } // namespace
 
 ComponentRegistry &ComponentRegistry::instance() {
-	static ComponentRegistry registry;
-	return registry;
+	// Heap-allocated and never freed: a function-local `static` would be
+	// destroyed during DLL teardown, and its destructor touches the Godot
+	// StringName registry that may already be gone by then. Leaking a single
+	// registry is intentional and harmless at process exit.
+	static ComponentRegistry *registry = new ComponentRegistry();
+	return *registry;
 }
 
 ComponentTypeId ComponentRegistry::register_component(const ComponentSchema &p_schema) {
@@ -245,10 +249,9 @@ ComponentTypeId ComponentRegistry::id_of(const godot::StringName &p_name) const 
 	return it == id_by_name_.end() ? INVALID_COMPONENT_TYPE : it->second;
 }
 
-const godot::StringName &ComponentRegistry::name_of(ComponentTypeId p_id) const {
+godot::StringName ComponentRegistry::name_of(ComponentTypeId p_id) const {
 	const ComponentSchema *schema = schema_of(p_id);
-	static const StringName empty;
-	return schema ? schema->type_name : empty;
+	return schema ? schema->type_name : godot::StringName();
 }
 
 void ComponentRegistry::clear() {

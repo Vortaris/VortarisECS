@@ -36,7 +36,7 @@ public:
 	const ComponentSchema *schema_of(ComponentTypeId p_id) const;
 	const ComponentSchema *schema_of(const godot::StringName &p_name) const;
 	ComponentTypeId id_of(const godot::StringName &p_name) const;
-	const godot::StringName &name_of(ComponentTypeId p_id) const;
+	godot::StringName name_of(ComponentTypeId p_id) const;
 	size_t count() const { return schemas_.size(); }
 
 	void clear();

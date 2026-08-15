@@ -17,6 +17,12 @@ extends SceneTree
 #   T11 change tracking first pass reports pre-existing writes
 #   T12 schema-only layout matches the real Godot type sizes
 #   T14 convenience API (spawn / each / getf / setf)
+# 0.2.0 additions:
+#   T15 entity(id)/has_entity(id) lookup + get_component null for unattached
+#   T16 StringFixed truncation keeps whole chars, warns, count==0 safe
+#   T18 observer field-level filter + change-tick throttle
+#   T19 network packet validation rejects truncated/id-conflict packets
+#   T20 shutdown resets transient state and the world stays reusable
 
 const EcsTestUtil := preload("res://scripts/ecs_test_util.gd")
 
@@ -35,6 +41,11 @@ func _initialize() -> void:
 	_test_t11_change_tracking_init(t)
 	_test_t12_schema_size(t)
 	_test_t14_convenience_api(t)
+	_test_t15_entity_lookup(t)
+	_test_t16_stringfixed_warning(t)
+	_test_t18_observer_field_throttle(t)
+	_test_t19_network_validation(t)
+	_test_t20_shutdown(t)
 	print("total=", t.total, " failures=", t.failures)
 	if t.failures == 0:
 		print("=== VortarisECS Regression OK ===")
@@ -365,4 +376,175 @@ func _test_t14_convenience_api(t: RefCounted) -> void:
 	t.expect_eq(float(w.get_field(e, "C14", "x")), 1.0, "T14: world.get_field")
 	w.set_field(e, "C14", "x", 42.0)
 	t.expect_eq(float(e.getf("C14", "x")), 42.0, "T14: world.set_field")
+	w.free()
+
+
+# T15: get_component on an unattached component returns null; entity(id) /
+# has_entity(id) resolve live vs dead handles.
+func _test_t15_entity_lookup(t: RefCounted) -> void:
+	print("-- T15: entity lookup --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T15C", [{"name": "v", "type": "I32"}])
+	var e: VECSEntity = w.create_entity()
+	var unattached: VECSComponent = e.get_component("T15C")
+	t.expect_eq(unattached, null, "T15: get_component null when component not attached")
+	e.add_component("T15C", {"v": 5})
+	var attached: VECSComponent = e.get_component("T15C")
+	t.expect(attached != null, "T15: get_component wrapper once attached")
+
+	var eid: int = e.get_id()
+	var found: VECSEntity = w.entity(eid)
+	t.expect(found != null, "T15: entity(id) finds a live entity")
+	t.expect_eq(found.get_id(), eid, "T15: entity(id) returns the same id")
+	t.expect_eq(w.has_entity(eid), true, "T15: has_entity(id) true for live entity")
+	t.expect_eq(w.entity(0), null, "T15: entity(0) is null")
+	t.expect_eq(w.has_entity(0), false, "T15: has_entity(0) false")
+	w.destroy_entity(e)
+	t.expect_eq(w.entity(eid), null, "T15: entity(id) null after destroy")
+	t.expect_eq(w.has_entity(eid), false, "T15: has_entity(id) false after destroy")
+	w.free()
+
+
+# T16: StringFixed truncation keeps whole UTF-8 characters, emits a warning, and
+# a count==0 buffer stores an empty string without crashing.
+func _test_t16_stringfixed_warning(t: RefCounted) -> void:
+	print("-- T16: StringFixed truncation + warning --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("Str16", [{"name": "s", "type": "StringFixed", "count": 8}])
+	var e: VECSEntity = w.create_entity()
+	# "中中中中" = 12 UTF-8 bytes; the 8-byte buffer holds 7 content bytes, which
+	# truncates to exactly 2 whole characters (6 bytes).
+	e.add_component("Str16", {"s": "中中中中"})
+	var s: String = e.get_component("Str16").get_field("s")
+	t.expect_eq(s.length(), 2, "T16: 4 chars truncated to 2 whole chars (got %d)" % s.length())
+
+	w.register_component("Str0", [{"name": "s", "type": "StringFixed", "count": 0}])
+	var e2: VECSEntity = w.create_entity()
+	e2.add_component("Str0", {"s": "abc"})
+	t.expect_eq(String(e2.get_component("Str0").get_field("s")), "", "T16: count==0 StringFixed stores empty string")
+	w.free()
+
+
+# T18: observer field-level subscription (write x triggers, write y does not)
+# and change-tick throttling (rapid writes within the window are suppressed).
+func _test_t18_observer_field_throttle(t: RefCounted) -> void:
+	print("-- T18: observer field filter + throttle --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T18C", [{"name": "x", "type": "F32"}, {"name": "y", "type": "F32"}])
+
+	var obs = preload("res://scripts/test_observer.gd").new()
+	obs.on_changed()
+	obs.set_fields(["x"])
+	w.add_observer(obs)
+	var e: VECSEntity = w.create_entity()
+	e.add_component("T18C", {"x": 0.0, "y": 0.0})
+	obs.event_log.clear()
+	e.get_component("T18C").set_field("x", 1.0)
+	t.expect_eq(obs.event_log.size(), 1, "T18: field x subscribed -> delivered")
+	obs.event_log.clear()
+	e.get_component("T18C").set_field("y", 1.0)
+	t.expect_eq(obs.event_log.size(), 0, "T18: field y not subscribed -> suppressed")
+	w.remove_observer(obs)
+	obs.free()
+
+	var obs2 = preload("res://scripts/test_observer.gd").new()
+	obs2.on_changed()
+	obs2.set_fields(["x"])
+	obs2.set_throttle_tick(10)
+	w.add_observer(obs2)
+	var e2: VECSEntity = w.create_entity()
+	e2.add_component("T18C", {"x": 0.0, "y": 0.0})
+	obs2.event_log.clear()
+	for i in 5:
+		e2.get_component("T18C").set_field("x", float(i))
+	t.expect_eq(obs2.event_log.size(), 1, "T18: throttle suppressed 4 of 5 rapid writes")
+	obs2.event_log.clear()
+	# Advance the change clock past the 10-tick throttle window, then write again.
+	for i in 10:
+		w.process(0.0, "")
+	e2.get_component("T18C").set_field("x", 99.0)
+	t.expect_eq(obs2.event_log.size(), 1, "T18: throttle expires after the window")
+	w.remove_observer(obs2)
+	obs2.free()
+	w.free()
+
+
+# T19: malformed network packets are rejected before any state is written; an
+# id-conflict spawn is rejected without overwriting the existing entity.
+func _test_t19_network_validation(t: RefCounted) -> void:
+	print("-- T19: network packet validation --")
+	var sw: VECSWorld = VECSWorld.new()
+	sw.register_component("NetT19", [{"name": "v", "type": "F32"}])
+	var cw: VECSWorld = VECSWorld.new()
+	var s_ns: VECSNetworkSync = VECSNetworkSync.new()
+	var c_ns: VECSNetworkSync = VECSNetworkSync.new()
+	s_ns.set_server(true)
+	s_ns.bind_world(sw)
+	c_ns.bind_world(cw)
+	s_ns.set_direct_peer(c_ns)
+
+	var se: VECSEntity = sw.create_entity()
+	se.add_component("NetT19", {"v": 10.0})
+	s_ns.tick(0.016)  # baseline spawn reaches the client
+	t.expect_eq(cw.query().with_all(["NetT19"]).execute().size(), 1, "T19: baseline spawn applied")
+
+	var type_id: int = cw.get_component_type("NetT19").get_id()
+	var sess: int = c_ns.get_session_id()
+
+	# Truncated spawn: version | id | ncomp=1 | type_id | only 2 of 4 bytes.
+	var pba := PackedByteArray()
+	pba.resize(2 + 8 + 2 + 4 + 2)
+	pba.encode_u16(0, 1)
+	var fresh_id: int = 1000
+	for i in 8:
+		pba.encode_u8(2 + i, (fresh_id >> (i * 8)) & 0xFF)
+	pba.encode_u16(10, 1)
+	for i in 4:
+		pba.encode_u8(12 + i, (type_id >> (i * 8)) & 0xFF)
+	var before_count: int = cw.entity_count()
+	c_ns._rpc_spawn(pba, sess)
+	t.expect_eq(cw.entity_count(), before_count, "T19: truncated spawn dropped, no partial entity")
+
+	# Well-formed spawn for an already-occupied id: rejected at preassigned id
+	# (packet-level failure), the existing entity's value stays intact.
+	var existing: VECSEntity = cw.query().with_all(["NetT19"]).execute()[0]
+	var conflict_id: int = existing.get_id()
+	var pba2 := PackedByteArray()
+	pba2.resize(2 + 8 + 2 + 4 + 4)
+	pba2.encode_u16(0, 1)
+	for i in 8:
+		pba2.encode_u8(2 + i, (conflict_id >> (i * 8)) & 0xFF)
+	pba2.encode_u16(10, 1)
+	for i in 4:
+		pba2.encode_u8(12 + i, (type_id >> (i * 8)) & 0xFF)
+	pba2.encode_float(16, 99.0)
+	c_ns._rpc_spawn(pba2, sess)
+	var after: VECSEntity = cw.query().with_all(["NetT19"]).execute()[0]
+	t.expect_eq(float(after.get_component("NetT19").get_field("v")), 10.0, "T19: id-conflict spawn rejected, value unchanged")
+
+	s_ns.free()
+	c_ns.free()
+	cw.free()
+	sw.free()
+
+
+# T20: shutdown() clears transient state (deferred ops, baselines) while
+# preserving entities; the world remains usable afterwards.
+func _test_t20_shutdown(t: RefCounted) -> void:
+	print("-- T20: shutdown resets transient state --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T20C", [{"name": "v", "type": "I32"}])
+	var e: VECSEntity = w.create_entity()
+	e.add_component("T20C", {"v": 1})
+	var e2: VECSEntity = w.create_entity()
+	var cmd: VECSCommandBuffer = w.commands()
+	cmd.add_component(e2, "T20C", {"v": 2})  # queued, never flushed
+	w.query().with_all(["T20C"]).changed(["T20C"]).execute()  # establishes a baseline
+	w.shutdown()
+	t.expect_eq(w.entity_count(), 2, "T20: entities preserved across shutdown")
+	var e3: VECSEntity = w.create_entity()
+	e3.add_component("T20C", {"v": 3})
+	t.expect_eq(w.entity_count(), 3, "T20: world reusable after shutdown")
+	cmd.flush()  # buffer was cleared by shutdown; must be a no-op
+	t.expect_eq(e2.has_component("T20C"), false, "T20: pending command buffer cleared by shutdown")
 	w.free()

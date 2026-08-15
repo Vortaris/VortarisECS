@@ -55,6 +55,10 @@ void uninitialize_vortarisecs_module(ModuleInitializationLevel p_level) {
 		return;
 	}
 	if (g_vecs_singleton) {
+		// Tear down the world (deferred ops, observer callbacks, scheduler,
+		// change baselines) BEFORE clearing the component registry: the world's
+		// cleanup must not touch already-cleared StringName schema names.
+		g_vecs_singleton->shutdown();
 		Engine::get_singleton()->unregister_singleton("VECS");
 		memdelete(g_vecs_singleton);
 		g_vecs_singleton = nullptr;

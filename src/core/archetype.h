@@ -29,7 +29,7 @@ struct Archetype {
 	Column &column(ComponentTypeId p_t);
 	const Column &column(ComponentTypeId p_t) const;
 
-	uint32_t add_entity(Entity p_e, uint32_t p_change_tick);
+	uint32_t add_entity(Entity p_e, uint64_t p_change_tick);
 	Entity remove_entity(Entity p_e); // returns the swap-moved entity, or null
 	void set_enabled(uint32_t p_row, bool p_on);
 	bool get_enabled(uint32_t p_row) const;

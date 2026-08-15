@@ -115,26 +115,26 @@ public:
 	// 0: a change query whose baseline was set earlier (or starts at 0) must
 	// report pre-enable rows once, otherwise every write that happened before
 	// tracking was turned on is silently lost.
-	void ensure_versions(uint32_t p_tick) {
+	void ensure_versions(uint64_t p_tick) {
 		if (!tracking_) {
 			tracking_ = true;
 			versions_.assign(size_, p_tick);
 		}
 	}
-	void mark_changed(size_t i, uint32_t p_tick) {
+	void mark_changed(size_t i, uint64_t p_tick) {
 		if (tracking_ && i < versions_.size()) {
 			versions_[i] = p_tick;
 		}
 	}
-	void set_version(size_t i, uint32_t p_version) {
+	void set_version(size_t i, uint64_t p_version) {
 		if (tracking_ && i < versions_.size()) {
 			versions_[i] = p_version;
 		}
 	}
-	bool row_changed_since(size_t i, uint32_t p_baseline) const {
+	bool row_changed_since(size_t i, uint64_t p_baseline) const {
 		return tracking_ && i < versions_.size() && versions_[i] > p_baseline;
 	}
-	uint32_t version_at(size_t i) const {
+	uint64_t version_at(size_t i) const {
 		return tracking_ && i < versions_.size() ? versions_[i] : 0;
 	}
 	bool has_versions() const { return tracking_; }
@@ -175,7 +175,7 @@ private:
 	size_t elem_size_ = 0;
 	size_t elem_align_ = 1;
 	size_t stride_ = 0;
-	std::vector<uint32_t> versions_;
+	std::vector<uint64_t> versions_;
 	bool tracking_ = false;
 };
 

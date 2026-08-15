@@ -101,7 +101,7 @@ godot::Array VECSQueryBuilder::execute() {
 	const auto &arches = world_->query_cache().match(q, world_->all_archetypes());
 
 	bool has_changed_filter = !changed_.empty();
-	uint32_t baseline = 0;
+	uint64_t baseline = 0;
 	uint64_t key = 0;
 	if (has_changed_filter) {
 		key = _baseline_key(q);
@@ -152,7 +152,7 @@ godot::Ref<VECSEntity> VECSQueryBuilder::execute_one() {
 	const auto &arches = world_->query_cache().match(q, world_->all_archetypes());
 
 	bool has_changed_filter = !changed_.empty();
-	uint32_t baseline = 0;
+	uint64_t baseline = 0;
 	uint64_t key = 0;
 	if (has_changed_filter) {
 		key = _baseline_key(q);

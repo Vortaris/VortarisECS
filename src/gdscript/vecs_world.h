@@ -37,6 +37,11 @@ public:
 	// ---- entity ----
 	godot::Ref<VECSEntity> create_entity();
 	godot::Ref<VECSEntity> create_entity_preassigned(int64_t p_id);
+	// Looks up a live entity by its raw 64-bit id. Returns a null handle when
+	// the id is not a live entity in this world (dead, recycled, or <= 0).
+	godot::Ref<VECSEntity> entity(int64_t p_id) const;
+	// Returns true when an entity with this raw 64-bit id is alive here.
+	bool has_entity(int64_t p_id) const;
 	void destroy_entity(const godot::Ref<VECSEntity> &p_entity);
 	bool is_alive(const godot::Ref<VECSEntity> &p_entity) const;
 	int64_t entity_count() const;
@@ -78,6 +83,11 @@ public:
 	void process(double p_delta, const godot::String &p_group);
 
 	void compact();
+	// Tears down transient state so the world can be reused or the extension can
+	// shut down cleanly: resets the core world (deferred ops, change baselines,
+	// command buffer), clears the observer dispatch and the system scheduler.
+	// Entities/archetypes are preserved.
+	void shutdown();
 	VECSWorld *get_world();
 
 	// ---- snapshot serialization ----
