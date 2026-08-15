@@ -17,6 +17,22 @@
 - **确定性二进制序列化** —— 小端、定宽、逐字节一致（byte-identical）的快照。
 - **可插拔网络同步** —— `VECSSyncStrategy` 抽象 + 默认的服务器权威快照复制（脏检查增量 + 定期对账 + 反幽灵）。传输层是 Godot 的 MultiplayerAPI（RPC），另附进程内直连测试传输。
 
+## 0.2.0 新特性
+
+- **实体查找** —— `world.entity(id)` / `world.has_entity(id)`；`get_component` 在组件未挂载时返回空句柄。
+- **字段默认值** —— `get_field` / `getf` 增加 `default` 参数，组件/字段缺失时返回默认值。
+- **查询易用性** —— `find_by_components(comps)`、`where(谓词)`、`order_by(comp, field)` 与 `order_by_id()`；默认顺序为 archetype 创建序 + 行序。
+- **数组字段** —— `VECSComponent.get_field_count` / `get_array_element` / `set_array_element`，以及 `VECSComponentType.get_field_count` / `get_field_type`（数组返回 `"Array:<type>"`）。
+- **id 映射** —— `spawn_from_data_mapped` / `deserialize_snapshot_json_mapped` 返回 `{source_id_or_index: new_id}`，`remap_reference` 改写跨实体引用；`spawn_from_data` 条目支持 `"parent"` 自动父子。
+- **实体池化** —— `create_entity_pooled` / `destroy_entity_pooled` / `pool_size` 回收 id 而不 bump 代数（过期句柄保持有效，文档注明取舍）。
+- **跨世界拷贝/合并** —— `copy_entity_to` / `merge_world` 返回 id 映射；把世界合并到自身即克隆。
+- **事件总线** —— `emit_event` 返回接收者数量；`subscribe_event` / `unsubscribe_event`；按值比较的 `on_field_changed(comp, field, callable)` + `off`。
+- **观察者过滤** —— 字段级 CHANGED 订阅（`set_fields`）与变更时钟节流（`set_throttle_tick`）。
+- **网络加固** —— 写入前先校验包（截断 / 未知 schema / id 冲突的包被丢弃，无部分状态）；`sync_priority` 现可节流增量发送（REALTIME / HIGH 20 Hz / MEDIUM 10 Hz / LOW 2 Hz）。
+- **ChangeView 优化** —— `take()` 通过逐列 max-version 快路径跳过未变化的 archetype，并从世界写日志增量收集（结果一致，快得多）。
+- **健壮性** —— 变更时钟扩为 64 位；实体代数回绕守卫；干净退出，消除全部退出期警告/泄漏。
+- **工具** —— `get_debug_stats()`、`VECSQueryBuilder.get_last_execution_time_usec()`，以及编辑器检查器 Dock。
+
 ## 架构
 
 ```

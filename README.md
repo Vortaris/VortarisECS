@@ -17,6 +17,22 @@ Design reference: [GECS](https://github.com/BlockBreaker-Studios/GECS) — its a
 - **Deterministic binary serialization** — little-endian, fixed-width, byte-identical snapshots.
 - **Pluggable network sync** — `VECSSyncStrategy` abstraction with a default server-authoritative snapshot replication (dirty-checked deltas + periodic reconciliation + anti-ghost). Transport is Godot's MultiplayerAPI (RPC), with a direct in-process test transport.
 
+## What's new in 0.2.0
+
+- **Entity lookup** — `world.entity(id)` / `world.has_entity(id)`; `get_component` now returns a null handle when the component is not attached.
+- **Field defaults** — `get_field` / `getf` accept a `default` value returned for missing components/fields.
+- **Query ergonomics** — `find_by_components(comps)`, `where(predicate)`, `order_by(comp, field)` and `order_by_id()`; default order is archetype creation order + row order.
+- **Array fields** — `VECSComponent.get_field_count` / `get_array_element` / `set_array_element`, plus `VECSComponentType.get_field_count` / `get_field_type` (`"Array:<type>"`).
+- **Id mapping** — `spawn_from_data_mapped` / `deserialize_snapshot_json_mapped` return `{source_id_or_index: new_id}`, and `remap_reference` rewrites cross-entity references; `spawn_from_data` entries accept `"parent"` for auto-parenting.
+- **Entity pooling** — `create_entity_pooled` / `destroy_entity_pooled` / `pool_size` recycle ids without bumping the generation (stale handles stay valid; documented trade-off).
+- **Cross-world copy/merge** — `copy_entity_to` / `merge_world` return id mappings; merging a world into itself clones it.
+- **Event bus** — `emit_event` returns the receiver count; `subscribe_event` / `unsubscribe_event`; value-compared `on_field_changed(comp, field, callable)` + `off`.
+- **Observer filters** — field-level CHANGED subscription (`set_fields`) and change-tick throttling (`set_throttle_tick`).
+- **Networking hardening** — packets are validated before any write (truncated / unknown-schema / id-conflict packets are dropped with no partial state); `sync_priority` now throttles delta sends (REALTIME / HIGH 20 Hz / MEDIUM 10 Hz / LOW 2 Hz).
+- **ChangeView optimization** — `take()` skips unchanged archetypes via a per-column max-version fast path and collects from a world write-log incrementally (same results, much faster).
+- **Robustness** — change clock widened to 64-bit; entity-generation wrap-around guard; clean shutdown that removes all exit-time warnings/leaks.
+- **Tooling** — `get_debug_stats()`, `VECSQueryBuilder.get_last_execution_time_usec()`, and an editor inspector dock.
+
 ## Architecture
 
 ```
