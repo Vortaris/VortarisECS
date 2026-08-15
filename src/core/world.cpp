@@ -238,6 +238,9 @@ void World::add_raw(Entity p_e, ComponentTypeId p_t, const void *p_data) {
 			std::memset(dst, 0, schema->size);
 		}
 		col.mark_changed(row, ++change_tick_);
+		if (col.has_versions()) {
+			_log_change(p_e, p_t, change_tick_);
+		}
 		observer_dispatch_.dispatch(ObserverEventType::Changed, p_e, p_t, godot::String(), godot::Variant());
 		return;
 	}
@@ -260,6 +263,9 @@ void World::add_raw(Entity p_e, ComponentTypeId p_t, const void *p_data) {
 		std::memset(dst, 0, schema->size);
 	}
 	col.mark_changed(new_row, ++change_tick_);
+	if (col.has_versions()) {
+		_log_change(p_e, p_t, change_tick_);
+	}
 	observer_dispatch_.dispatch(ObserverEventType::Added, p_e, p_t, godot::String(), godot::Variant());
 	_invalidate_cache();
 }
@@ -314,6 +320,7 @@ void World::mark_changed(Entity p_e, ComponentTypeId p_t, const godot::String &p
 	Column &col = a->column(p_t);
 	col.ensure_versions(change_tick_);
 	col.mark_changed(it->second.row, ++change_tick_);
+	_log_change(p_e, p_t, change_tick_);
 	observer_dispatch_.dispatch(ObserverEventType::Changed, p_e, p_t, p_field, godot::Variant());
 }
 
@@ -442,6 +449,10 @@ void World::clear() {
 		_free_entity_id(e);
 	}
 	_invalidate_cache();
+	// Drop the write log: after a wholesale replace, stale write entries would
+	// otherwise reference dead ids forever.
+	change_log_.clear();
+	change_log_pos_ = 0;
 	// Notify listeners (e.g. network sync) that the world was replaced wholesale,
 	// so they can drop their tracked state. Loading a save is not per-entity
 	// "death", hence the custom event instead of per-entity Removed events.
@@ -654,6 +665,9 @@ void World::_commit_deferred_move(Entity p_e) {
 			std::memset(dst, 0, s->size);
 		}
 		col.mark_changed(row, ++change_tick_);
+		if (col.has_versions()) {
+			_log_change(p_e, t, change_tick_);
+		}
 	}
 
 	// Dispatch net-change events, one per type against the original set:
@@ -674,6 +688,10 @@ void World::_commit_deferred_move(Entity p_e) {
 	if (structural) {
 		_invalidate_cache();
 	}
+}
+
+void World::_log_change(Entity p_e, ComponentTypeId p_t, uint64_t p_tick) {
+	change_log_.push_back({ p_e, p_t, p_tick });
 }
 
 uint32_t World::_move_entity_to(Entity p_e, Archetype *p_from, Archetype *p_to, uint32_t p_from_row) {

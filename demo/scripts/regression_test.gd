@@ -33,6 +33,8 @@ extends SceneTree
 #   T28 on_field_changed value-compared subscription + off
 #   T29 event bus: subscribe_event / unsubscribe_event / emit return count
 #   T30 get_debug_stats + query execution time
+#   T31 ChangeView::take() log consistency (pre-existing once, dedup)
+#   T32 sync_priority delta throttle (MEDIUM ~ 0.1s)
 
 const EcsTestUtil := preload("res://scripts/ecs_test_util.gd")
 
@@ -66,6 +68,8 @@ func _initialize() -> void:
 	_test_t28_on_field_changed(t)
 	_test_t29_event_bus(t)
 	_test_t30_debug_stats(t)
+	_test_t31_changeview_log(t)
+	_test_t32_sync_throttle(t)
 	print("total=", t.total, " failures=", t.failures)
 	if t.failures == 0:
 		print("=== VortarisECS Regression OK ===")
@@ -834,3 +838,67 @@ func _test_t30_debug_stats(t: RefCounted) -> void:
 	q.execute()
 	t.expect(int(q.get_last_execution_time_usec()) >= 0, "T30: query exec time reported")
 	w.free()
+
+
+# T31: ChangeView::take() (via the C++ ViewSystem) — pre-existing entities are
+# reported exactly once, a second take with no writes is empty, and multiple
+# writes to one entity between takes deduplicate to a single report.
+func _test_t31_changeview_log(t: RefCounted) -> void:
+	print("-- T31: ChangeView log consistency --")
+	var w: VECSWorld = VECSWorld.new()
+	# Position / Velocity are the C++ demo components registered at init.
+	var vs: ViewSystem = ViewSystem.new()
+	vs.group = "t31"
+	w.add_system(vs)
+	for i in 3:
+		var e: VECSEntity = w.create_entity()
+		e.add_component("Position", {"x": 0.0, "y": 0.0, "z": 0.0})
+	w.process(0.016, "t31")
+	t.expect_eq(int(vs.get_changed_count()), 3, "T31: first take reports all pre-existing")
+	w.process(0.016, "t31")
+	t.expect_eq(int(vs.get_changed_count()), 0, "T31: second take with no writes is empty")
+	var ents: Array = w.query().with_all(["Position"]).execute()
+	ents[0].get_component("Position").set_field("x", 1.0)
+	w.process(0.016, "t31")
+	t.expect_eq(int(vs.get_changed_count()), 1, "T31: one write -> one changed entity")
+	var c: VECSComponent = ents[0].get_component("Position")
+	c.set_field("x", 2.0)
+	c.set_field("x", 3.0)
+	w.process(0.016, "t31")
+	t.expect_eq(int(vs.get_changed_count()), 1, "T31: multiple writes to one entity dedup to one")
+	w.remove_system(vs)
+	vs.free()
+	w.free()
+
+
+# T32: sync_priority delta throttling. A MEDIUM (0.1s) networked field sent over
+# ~0.5s reaches the client only a handful of times, not once per write.
+func _test_t32_sync_throttle(t: RefCounted) -> void:
+	print("-- T32: sync_priority throttle --")
+	var sw: VECSWorld = VECSWorld.new()
+	sw.register_component("NetT32", [{"name": "v", "type": "F32", "sync_priority": 2}])  # MEDIUM
+	var cw: VECSWorld = VECSWorld.new()
+	var s_ns: VECSNetworkSync = VECSNetworkSync.new()
+	var c_ns: VECSNetworkSync = VECSNetworkSync.new()
+	s_ns.set_server(true)
+	s_ns.bind_world(sw)
+	c_ns.bind_world(cw)
+	s_ns.set_direct_peer(c_ns)
+	var se: VECSEntity = sw.create_entity()
+	se.add_component("NetT32", {"v": 0.0})
+	s_ns.tick(0.016)  # spawn
+	var ce: VECSEntity = cw.query().with_all(["NetT32"]).execute()[0]
+	var last_val: float = ce.get_component("NetT32").get_field("v")
+	var updates := 0
+	for i in 40:
+		se.get_component("NetT32").set_field("v", float(i))
+		s_ns.tick(0.013)  # ~0.52s total
+		var cur: float = ce.get_component("NetT32").get_field("v")
+		if cur != last_val:
+			updates += 1
+			last_val = cur
+	t.expect(updates >= 3 and updates <= 8, "T32: MEDIUM throttled to ~5 updates (got %d)" % updates)
+	s_ns.free()
+	c_ns.free()
+	cw.free()
+	sw.free()

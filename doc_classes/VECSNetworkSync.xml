@@ -8,9 +8,13 @@
 	<description>
 		[b]VECSNetworkSync[/b] connects one [VECSWorld] to a [VECSSyncStrategy] (default: [VECSSnapshotReplication]) and drives replication. On the server, call [method tick] each frame; the strategy spawns networked entities, pushes dirty fields as deltas, despawns destroyed entities and periodically broadcasts a full state for reconciliation.
 
+		Delta sends are throttled by each component's [code]sync_priority[/code]: the component's effective interval is the fastest tier among its networked fields — REALTIME every tick, HIGH 20 Hz, MEDIUM 10 Hz, LOW 2 Hz. A field at SPAWN_ONLY is sent once inside the spawn packet and never in a delta; a component whose non-local fields are all SPAWN_ONLY/LOCAL never enters a delta. The throttle applies to the whole component (per entity), so a field is only ever sent as part of its component's block.
+
 		Transport is Godot's MultiplayerAPI (RPC); for testing, connect two nodes with [method set_direct_peer] to deliver packets in-process without a network.
 
 		[b]VECSNetworkSync[/b] 把一个 [VECSWorld] 连接到 [VECSSyncStrategy]（默认：[VECSSnapshotReplication]）并驱动复制。在服务器上每帧调用 [method tick]；策略会生成网络实体、以增量推送脏字段、销毁实体的反生成，并定期广播全量状态以对账。
+
+		增量发送按每个组件的 [code]sync_priority[/code] 节流：组件生效间隔取其中联网字段最快档位——REALTIME 每 tick、HIGH 20 Hz、MEDIUM 10 Hz、LOW 2 Hz。SPAWN_ONLY 字段只在生成包内发送一次，绝不进增量；仅含 SPAWN_ONLY/LOCAL 字段的组件永不进增量。节流作用于整个组件（按实体），因此字段只会随其组件块一起发送。
 
 		传输层是 Godot 的 MultiplayerAPI（RPC）；测试时用 [method set_direct_peer] 连接两个节点，即可在进程内传递数据包而无需网络。
 	</description>

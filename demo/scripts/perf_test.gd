@@ -64,6 +64,27 @@ func _initialize() -> void:
 	print("10000 structural changes via command buffer: %.3f ms" % [(t11 - t10) / 1000.0])
 	print("final entity count: ", world.entity_count())
 
+	# --- ChangeView::take() perf (issue#1 two-layer optimization) ---
+	# First take reports every pre-existing Position entity; the steady-state take
+	# should skip all unchanged archetypes via the per-column max-version fast path.
+	var vp: ViewSystem = ViewSystem.new()
+	vp.group = "changeview"
+	world.add_system(vp)
+	world.process(0.016, "changeview")  # first take: all pre-existing reported
+	var first_changed: int = vp.get_changed_count()
+	var t12 := Time.get_ticks_usec()
+	world.process(0.016, "changeview")  # steady state, nothing changed
+	var t13 := Time.get_ticks_usec()
+	print("ChangeView take() steady-state over %d: %.3f ms (changed=%d)" % [N, (t13 - t12) / 1000.0, vp.get_changed_count()])
+	var one_ent: VECSEntity = world.query().with_all(["Position"]).execute_one()
+	one_ent.get_component("Position").set_field("x", 0.001)
+	var t14 := Time.get_ticks_usec()
+	world.process(0.016, "changeview")
+	var t15 := Time.get_ticks_usec()
+	print("ChangeView take() 1-change over %d: %.3f ms (changed=%d, first_pass=%d)" % [N, (t15 - t14) / 1000.0, vp.get_changed_count(), first_changed])
+	world.remove_system(vp)
+	vp.free()
+
 	world.remove_system(ms)
 	ms.free()
 	print("=== VortarisECS Performance Test OK ===")

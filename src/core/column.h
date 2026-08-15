@@ -35,6 +35,7 @@ public:
 			stride_ = p_other.stride_;
 			versions_ = std::move(p_other.versions_);
 			tracking_ = p_other.tracking_;
+			max_version_ = p_other.max_version_;
 			p_other.data_ = nullptr;
 			p_other.alloc_base_ = nullptr;
 			p_other.capacity_ = 0;
@@ -43,6 +44,7 @@ public:
 			p_other.elem_align_ = 1;
 			p_other.stride_ = 0;
 			p_other.tracking_ = false;
+			p_other.max_version_ = 0;
 		}
 		return *this;
 	}
@@ -87,6 +89,9 @@ public:
 		--size_;
 		if (tracking_) {
 			versions_.pop_back();
+			// Conservative downgrade: the row that held the max version may have
+			// been removed, so force the next change query to re-scan.
+			max_version_ = 0;
 		}
 	}
 	void pop_back() {
@@ -96,12 +101,14 @@ public:
 		--size_;
 		if (tracking_) {
 			versions_.pop_back();
+			max_version_ = 0;
 		}
 	}
 	void clear() {
 		size_ = 0;
 		if (tracking_) {
 			versions_.clear();
+			max_version_ = 0;
 		}
 	}
 
@@ -119,16 +126,23 @@ public:
 		if (!tracking_) {
 			tracking_ = true;
 			versions_.assign(size_, p_tick);
+			max_version_ = p_tick;
 		}
 	}
 	void mark_changed(size_t i, uint64_t p_tick) {
 		if (tracking_ && i < versions_.size()) {
 			versions_[i] = p_tick;
+			if (p_tick > max_version_) {
+				max_version_ = p_tick;
+			}
 		}
 	}
 	void set_version(size_t i, uint64_t p_version) {
 		if (tracking_ && i < versions_.size()) {
 			versions_[i] = p_version;
+			if (p_version > max_version_) {
+				max_version_ = p_version;
+			}
 		}
 	}
 	bool row_changed_since(size_t i, uint64_t p_baseline) const {
@@ -138,6 +152,9 @@ public:
 		return tracking_ && i < versions_.size() ? versions_[i] : 0;
 	}
 	bool has_versions() const { return tracking_; }
+	// Highest version currently in the column (used by ChangeView to skip an
+	// archetype whose watched columns were not touched since a baseline).
+	uint64_t max_version() const { return tracking_ ? max_version_ : 0; }
 
 private:
 	void free_buf() {
@@ -150,6 +167,7 @@ private:
 		size_ = 0;
 		versions_.clear();
 		tracking_ = false;
+		max_version_ = 0;
 	}
 	void realloc_to(size_t p_new_cap) {
 		size_t bytes = p_new_cap * stride_;
@@ -176,6 +194,7 @@ private:
 	size_t elem_align_ = 1;
 	size_t stride_ = 0;
 	std::vector<uint64_t> versions_;
+	uint64_t max_version_ = 0;
 	bool tracking_ = false;
 };
 

@@ -25,6 +25,42 @@ void patch_u32(vortaris::BinaryBuffer &p_buf, size_t p_pos, uint32_t p_value) {
 // malformed reference so the caller can drop the packet BEFORE touching the
 // world — a truncated or schema-mismatched packet must never leave a partially
 // applied state.
+// Seconds between delta sends for a sync priority tier. Returns -1 for tiers
+// that never participate in deltas (SPAWN_ONLY / LOCAL).
+double priority_interval(uint8_t p_priority) {
+	switch (p_priority) {
+		case vortaris::SYNC_REALTIME: return 0.0;
+		case vortaris::SYNC_HIGH: return 0.05;
+		case vortaris::SYNC_MEDIUM: return 0.1;
+		case vortaris::SYNC_LOW: return 0.5;
+		default: return -1.0;
+	}
+}
+
+// Effective delta-send interval of a component: the FASTEST (smallest) interval
+// among its networked fields. A component whose only non-local fields are
+// SPAWN_ONLY is sent once in the spawn packet and never in deltas (-1).
+double component_interval(vortaris::ComponentTypeId p_t) {
+	const vortaris::ComponentSchema *s = vortaris::ComponentRegistry::instance().schema_of(p_t);
+	if (!s) {
+		return -1.0;
+	}
+	double fastest = -1.0;
+	for (const auto &f : s->fields) {
+		if (!f.is_networked) {
+			continue;
+		}
+		const double iv = priority_interval(f.sync_priority);
+		if (iv < 0.0) {
+			continue; // spawn-only / local fields create no delta obligation
+		}
+		if (fastest < 0.0 || iv < fastest) {
+			fastest = iv;
+		}
+	}
+	return fastest;
+}
+
 bool validate_packet(const vortaris::BinaryBuffer &p_data, SyncPacketKind p_kind) {
 	vortaris::BinaryBuffer in = p_data;
 	in.seek(0);
@@ -228,27 +264,54 @@ void VECSSnapshotReplication::build_delta(VECSNetworkSync &p_ns, vortaris::Binar
 	size_t count_pos = r_out.pos();
 	r_out.write_u32(0);
 	uint32_t n = 0;
-	for (const auto &kv : dirty_) {
-		vortaris::Entity e = kv.first;
+
+	for (auto it = dirty_.begin(); it != dirty_.end();) {
+		vortaris::Entity e = it->first;
 		if (!w.is_alive(e)) {
+			it = dirty_.erase(it);
 			continue;
 		}
 		vortaris::BinaryBuffer comp_buf;
 		uint8_t ncomp = 0;
-		for (vortaris::ComponentTypeId t : kv.second) {
-			if (is_networked(t) && w.has(e, t)) {
-				serialize_component_block(p_ns, e, t, comp_buf);
-				++ncomp;
+		auto &comp_set = it->second;
+		for (auto cit = comp_set.begin(); cit != comp_set.end();) {
+			const vortaris::ComponentTypeId t = *cit;
+			if (!is_networked(t) || !w.has(e, t)) {
+				cit = comp_set.erase(cit);
+				continue;
 			}
+			// Sync-priority throttle: components are sent at most once per their
+			// effective interval. Undue components stay dirty and are retried on
+			// a later tick; spawn-only components are never sent in deltas.
+			const double iv = component_interval(t);
+			if (iv < 0.0) {
+				cit = comp_set.erase(cit); // spawn-only / local: never in a delta
+				continue;
+			}
+			double &next = next_send_tick_[e][t];
+			if (elapsed_time_ < next) {
+				++cit; // not due yet: keep dirty for a later send
+				continue;
+			}
+			serialize_component_block(p_ns, e, t, comp_buf);
+			++ncomp;
+			next = elapsed_time_ + iv;
+			cit = comp_set.erase(cit);
 		}
-		if (ncomp == 0) {
-			continue;
+		const bool emptied = comp_set.empty();
+		if (ncomp > 0) {
+			r_out.write_u64(e.id);
+			r_out.write_u8(ncomp);
+			r_out.write_bytes(comp_buf.data(), comp_buf.size());
+			++n;
 		}
-		r_out.write_u64(e.id);
-		r_out.write_u8(ncomp);
-		r_out.write_bytes(comp_buf.data(), comp_buf.size());
-		++n;
+		if (emptied) {
+			it = dirty_.erase(it);
+		} else {
+			++it;
+		}
 	}
+
 	if (n > 0) {
 		patch_u32(r_out, count_pos, n);
 	} else {
@@ -301,6 +364,7 @@ void VECSSnapshotReplication::tick(VECSNetworkSync &p_ns, double p_delta) {
 		return;
 	}
 	++tick_count_;
+	elapsed_time_ += p_delta;
 	vortaris::World &w = p_ns.world()->core();
 
 	// Spawns (delayed one tick so multi-component entities spawn complete).
@@ -329,14 +393,15 @@ void VECSSnapshotReplication::tick(VECSNetworkSync &p_ns, double p_delta) {
 		pending_spawn_.clear();
 	}
 
-	// Deltas (dirty networked components).
+	// Deltas (dirty networked components). build_delta removes the components it
+	// actually sent; components that were throttled (not yet due) stay dirty so
+	// they are retried on a later tick.
 	if (!dirty_.empty()) {
 		vortaris::BinaryBuffer buf;
 		build_delta(p_ns, buf);
 		if (buf.size() > 0) {
 			p_ns.send_packet(SyncPacketKind::Delta, buf);
 		}
-		dirty_.clear();
 	}
 
 	// Despawns. The entity may already be dead locally — that is the point:
@@ -383,6 +448,8 @@ void VECSSnapshotReplication::reset_state() {
 	client_replicated_.clear();
 	tick_count_ = 0;
 	reconcile_accum_ = 0.0;
+	elapsed_time_ = 0.0;
+	next_send_tick_.clear();
 }
 
 void VECSSnapshotReplication::apply_spawn(VECSNetworkSync &p_ns, const vortaris::BinaryBuffer &p_data) {

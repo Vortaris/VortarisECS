@@ -43,11 +43,12 @@ struct PendingComponentOp {
 	std::vector<uint8_t> data;
 };
 
-// One entry in the change log: an entity whose watched component was written at
+// One entry in the change log: an entity whose component `comp` was written at
 // `tick`. ChangeView::take() consumes this incrementally to avoid re-scanning
 // every matching archetype row on each take.
 struct ChangeLogEntry {
 	Entity entity;
+	ComponentTypeId comp = 0;
 	uint64_t tick = 0;
 };
 
@@ -180,6 +181,9 @@ public:
 
 	ComponentRegistry &registry() { return ComponentRegistry::instance(); }
 
+	// ---- change log (ChangeView fast path) ----
+	const std::vector<ChangeLogEntry> &change_log() const { return change_log_; }
+
 	// ---- internals used by CommandBuffer / archetype transitions ----
 	Archetype *move_entity(Entity p_e, Archetype *p_target, uint32_t *r_row);
 
@@ -193,6 +197,9 @@ private:
 	void _queue_deferred_move(Entity p_e);
 	void _commit_deferred_move(Entity p_e);
 	uint32_t _move_entity_to(Entity p_e, Archetype *p_from, Archetype *p_to, uint32_t p_from_row);
+	// Records a component write in the change log (only called when the column
+	// has version tracking enabled, so untracked writes stay out of the log).
+	void _log_change(Entity p_e, ComponentTypeId p_t, uint64_t p_tick);
 
 	std::vector<uint32_t> slot_generations_;
 	std::vector<uint32_t> free_slots_;
@@ -423,12 +430,34 @@ public:
 		if (!world_) {
 			return out;
 		}
+		std::unordered_set<Entity> seen;
 		const auto &arches = world_->query_cache().match(query_, world_->all_archetypes());
+
+		// Layer (a): per-archetype fast-skip. If every watched column's max
+		// version is at or below the baseline, no row in that archetype can have
+		// changed — skip the whole archetype instead of scanning it. On the first
+		// take, ensure_versions stamps pre-existing rows with the current tick, so
+		// those rows report exactly once (same semantics as the old full scan).
 		for (Archetype *a : arches) {
+			bool present = false;
 			for (ComponentTypeId t : ids_) {
 				if (a->has_component(t)) {
 					a->column(t).ensure_versions(world_->change_tick());
+					present = true;
 				}
+			}
+			if (!present) {
+				continue;
+			}
+			bool skip = true;
+			for (ComponentTypeId t : ids_) {
+				if (a->has_component(t) && a->column(t).max_version() > baseline_) {
+					skip = false;
+					break;
+				}
+			}
+			if (skip) {
+				continue;
 			}
 			for (size_t row = 0; row < a->entities.size(); ++row) {
 				bool changed = false;
@@ -438,18 +467,59 @@ public:
 						break;
 					}
 				}
-				if (changed) {
+				if (changed && seen.insert(a->entities[row]).second) {
 					out.push_back(a->entities[row]);
 				}
 			}
 		}
+
+		// Layer (b): incremental change-log collection. Writes to tracked columns
+		// were appended to the world log; consume the new entries and filter by
+		// watched component, liveness and current membership.
+		const std::vector<ChangeLogEntry> &log = world_->change_log();
+		for (size_t i = log_pos_; i < log.size(); ++i) {
+			const ChangeLogEntry &e = log[i];
+			if (e.tick <= baseline_) {
+				continue;
+			}
+			bool watched = false;
+			for (ComponentTypeId t : ids_) {
+				if (e.comp == t) {
+					watched = true;
+					break;
+				}
+			}
+			if (!watched || !world_->is_alive(e.entity) || !_matches_all(e.entity)) {
+				continue;
+			}
+			if (seen.insert(e.entity).second) {
+				out.push_back(e.entity);
+			}
+		}
+		log_pos_ = log.size();
+
 		baseline_ = world_->change_tick();
+		// Deterministic order (the pre-optimization scan order is not part of the
+		// contract — only the reported set is).
+		std::sort(out.begin(), out.end(), [](const Entity &a, const Entity &b) {
+			return a.id < b.id;
+		});
 		return out;
 	}
 
 private:
+	bool _matches_all(Entity p_e) const {
+		for (ComponentTypeId t : ids_) {
+			if (!world_->has(p_e, t)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	World *world_;
 	uint64_t baseline_;
+	size_t log_pos_ = 0;
 	std::array<ComponentTypeId, sizeof...(Comps)> ids_;
 	Query query_;
 };
