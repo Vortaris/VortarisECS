@@ -71,18 +71,18 @@ jobs:
           path: godot-cpp
 
       - name: Prebuild godot-cpp (debug)
-        run: scons platform=${{ matrix.platform }} target=template_debug arch=${{ matrix.arch }} -j4
+        run: scons platform=${{ matrix.platform }} target=template_debug arch=${{ matrix.arch }} api_version=4.7 -j4
         working-directory: godot-cpp
 
       - name: Prebuild godot-cpp (release)
-        run: scons platform=${{ matrix.platform }} target=template_release arch=${{ matrix.arch }} -j4
+        run: scons platform=${{ matrix.platform }} target=template_release arch=${{ matrix.arch }} api_version=4.7 -j4
         working-directory: godot-cpp
 
       - name: Build plugin (debug)
-        run: scons platform=${{ matrix.platform }} target=template_debug arch=${{ matrix.arch }} build_library=False godot_cpp_path="$GODOT_CPP_PATH" -j4
+        run: scons platform=${{ matrix.platform }} target=template_debug arch=${{ matrix.arch }} build_library=False godot_cpp_path="$GODOT_CPP_PATH" api_version=4.7 -j4
 
       - name: Build plugin (release)
-        run: scons platform=${{ matrix.platform }} target=template_release arch=${{ matrix.arch }} build_library=False godot_cpp_path="$GODOT_CPP_PATH" -j4
+        run: scons platform=${{ matrix.platform }} target=template_release arch=${{ matrix.arch }} build_library=False godot_cpp_path="$GODOT_CPP_PATH" api_version=4.7 -j4
 
       - name: Verify binaries exist
         run: ls -la demo/addons/vortarisecs/bin/
