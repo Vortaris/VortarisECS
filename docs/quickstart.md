@@ -89,3 +89,22 @@ When a system grows, reach for the rest of the toolbox — all documented in the
   `VECSObserver`.
 - **Networking**: bind a `VECSNetworkSync` to a world; dirty-checked deltas and
   periodic reconciliation are handled for you.
+
+## Debugging a running game (0.2.x)
+
+Three ways to inspect the **live** world (added in 0.2.0/0.2.1) — full details
+in [`AI_DEBUGGING.md`](AI_DEBUGGING.md):
+
+- **Headless CLI** (after the world is built, output is `[vortarisecs]`-prefixed):
+  - `godot --headless --path demo -- --vortaris-ecs-stats` — print
+    `get_debug_stats()` JSON and exit 0.
+  - `godot --headless --path demo -- --vortaris-ecs-snapshot save.json` — export
+    `serialize_snapshot_json()` to `user://` and exit 0.
+- **Runtime overlay** (`--vortaris-ecs-overlay on`, or toggle with **F2** while
+  the game runs) — an in-game HUD with live stats, an entity→component→field
+  browser and JSON snapshot export/import.
+- **MCP `run_script`** — call the plugin API directly inside a running game
+  (`Engine.get_singleton("VECS").get_world()`).
+
+Also new: `world.set_verbose(true)` / `world.is_verbose()` toggle tiered verbose
+logging (debug builds only, gated by the `vortarisecs/verbose` project setting).

@@ -10,13 +10,13 @@ Point the plugin build at your checkout with `godot_cpp_path=` (or the
 `GODOT_CPP_PATH` env var). `godot` below is your Godot 4.7 binary.
 
 ```bash
-# Build the plugin DLL (outputs to demo/bin/)
+# Build the plugin DLL (outputs to demo/addons/vortarisecs/bin/)
 scons -j 8 platform=windows target=template_debug arch=x86_64 build_library=False godot_cpp_path=<path-to-godot-cpp>
 
 # Functional demo (expect "=== VortarisECS Demo OK ===", exit 0)
 godot --headless --path demo
 
-# Regression suite (T1–T32, 129 assertions; exit 0 = all pass)
+# Regression suite (T1–T34, 143 assertions; exit 0 = all pass)
 godot --headless --path demo --script res://scripts/regression_test.gd
 
 # Minimal convenience-API example + perf baseline
@@ -96,6 +96,26 @@ into a scratch buffer).
 No C++ unit tests (core depends on godot-cpp runtime). Regression coverage is
 GDScript headless scripts in `demo/scripts/`:
 `ecs_test_util.gd` (assert helper) + `regression_test.gd` (`extends SceneTree`,
-runs T1–T32, `quit(0/1)`). Add a numbered `_test_tN_*` for any new behavior and
-call it from `_initialize()`. The functional `main.gd` demo doubles as a
-smoke test for the full feature set end-to-end.
+runs T1–T34, 143 assertions, `quit(0/1)`). Add a numbered `_test_tN_*` for any
+new behavior and call it from `_initialize()`. The functional `main.gd` demo
+doubles as a smoke test for the full feature set end-to-end.
+
+## Docs & API conventions
+
+- **`doc_classes/*.xml` is the authoritative GDScript API reference** (compiled
+  into the editor's F1 help). Whenever `_bind_methods` in `src/gdscript/*.cpp`
+  changes — new method, new param, new default, new enum constant — update the
+  matching `doc_classes/<Class>.xml` (both the English and Chinese paragraphs)
+  and rebuild the DLL so the in-editor class reference stays in sync.
+- **Null handles for missing things**: `VECSEntity.get_component` /
+  `VECSWorld.get_component_type` return a null handle when the thing is not
+  attached/registered (never an invalid wrapper). Tests must check `== null`.
+- **Default values**: `get_field` / `getf` / `VECSComponent.get_field` take a
+  `default` Variant (null by default) returned when the component/field is
+  missing. The default must be a real value, not a magic sentinel.
+- **Convenience sugar** (`spawn`, `each`, `find_by_components`, `get_field` /
+  `set_field`, `getf`/`setf`) is a thin wrapper over the flexible APIs; keep
+  behavior in the flexible layer and delegate.
+- **Doc/test parity**: adding or changing a public method should be covered by a
+  regression test, a `doc_classes` entry, and a one-line mention in the README /
+  RELEASE_NOTES "What's new" section for the current release.

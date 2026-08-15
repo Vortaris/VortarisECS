@@ -5,7 +5,8 @@ portable** — it uses only standard C++ and godot-cpp's cross-platform API (no
 platform conditionals, no MSVC/GCC-specific syntax), and the binary serializer
 uses explicit little-endian encoding so snapshots are byte-identical across
 platforms. Every release ships a prebuilt **Windows x86_64** plugin; other
-platforms are built once on their own machine and dropped into `demo/bin/`.
+platforms are built once on their own machine and dropped into
+`demo/addons/vortarisecs/bin/`.
 
 | Platform | godot-cpp platform name | Toolchain | Output |
 |---|---|---|---|
@@ -56,10 +57,25 @@ that platform. The first time you open the project, Godot generates
 
 ```bash
 godot --headless --path demo                                   # functional demo
-godot --headless --path demo --script res://scripts/regression_test.gd   # T1-T14, exit 0
+godot --headless --path demo --script res://scripts/regression_test.gd   # T1-T34, 143 assertions; exit 0 = all pass
 godot --headless --path demo --script res://scripts/quickstart.gd
 godot --headless --path demo --script res://scripts/perf_test.gd
 ```
+
+### 0.2.x debug tooling (works headless on any platform)
+
+Since 0.2.0/0.2.1 the demo also ships headless/AI-friendly debugging entry
+points — a one-shot stats dump, a JSON snapshot export, and a runtime overlay.
+They work identically on every platform (they run after the world is built):
+
+```bash
+godot --headless --path demo -- --vortaris-ecs-stats          # print get_debug_stats() JSON, exit 0
+godot --headless --path demo -- --vortaris-ecs-snapshot save.json   # export JSON snapshot to user://, exit 0
+godot --path demo -- --vortaris-ecs-overlay on                # launch with the runtime overlay (F2 toggles)
+```
+
+Output is `[vortarisecs]`-prefixed. Full parameter table and MCP `run_script`
+examples are in [`docs/AI_DEBUGGING.md`](AI_DEBUGGING.md).
 
 ## Notes
 

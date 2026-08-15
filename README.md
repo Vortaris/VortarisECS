@@ -6,6 +6,11 @@ A modern, data-oriented ECS (Entity-Component-System) framework for **Godot 4.7*
 
 Design reference: [GECS](https://github.com/BlockBreaker-Studios/GECS) — its archetype SoA storage, layered entity ids, deferred command buffer, query builder, observers and hierarchical network sync patterns were ported to native C++.
 
+> **API 权威参考 (Authoritative reference)**: the class reference in
+> [`doc_classes/*.xml`](doc_classes/) is the source of truth for the GDScript
+> API (it is compiled into the editor's F1 help). If anything in this README
+> conflicts with `doc_classes/`, trust `doc_classes/`.
+
 ## Features
 
 - **Pure C++ data components** — components are plain trivially-copyable structs stored in cache-friendly archetype columns (SoA). A declarative schema macro exposes fields for GDScript access and binary serialization.
@@ -50,7 +55,8 @@ Design reference: [GECS](https://github.com/BlockBreaker-Studios/GECS) — its a
 - **Observer filters** — field-level CHANGED subscription (`set_fields`) and change-tick throttling (`set_throttle_tick`).
 - **Networking hardening** — packets are validated before any write (truncated / unknown-schema / id-conflict packets are dropped with no partial state); `sync_priority` now throttles delta sends (REALTIME / HIGH 20 Hz / MEDIUM 10 Hz / LOW 2 Hz).
 - **ChangeView optimization** — `take()` skips unchanged archetypes via a per-column max-version fast path and collects from a world write-log incrementally (same results, much faster).
-- **Robustness** — change clock widened to 64-bit; entity-generation wrap-around guard; clean shutdown that removes all exit-time warnings/leaks.
+- **StringFixed** — writes are truncated to the fixed capacity on a UTF-8 code-point boundary (whole characters only) and emit a warning; `count == 0` stores an empty string.
+- **Robustness** — `shutdown()` resets transient state (deferred ops, change baselines, observer dispatch, scheduler) so a world can be reused; change clock widened to 64-bit; entity-generation wrap-around guard; clean shutdown that removes all exit-time warnings/leaks.
 - **Tooling** — `get_debug_stats()`, `VECSQueryBuilder.get_last_execution_time_usec()`, and an editor inspector dock.
 
 ## Architecture
@@ -58,17 +64,24 @@ Design reference: [GECS](https://github.com/BlockBreaker-Studios/GECS) — its a
 ```
 GDScript layer (VECS-prefixed classes)          C++ core (namespace vortaris)
 ─────────────────────────────────────           ─────────────────────────────
-VECSWorld (Node / "VECS" singleton) ───────────► World
-VECSEntity (RefCounted handle)      ───────────► Entity (64-bit layered id)
-VECSComponent (field accessor)      ───────────► Archetype (SoA columns)
-VECSQueryBuilder (fluent)           ───────────► Query / QueryCache
-VECSCommandBuffer                   ───────────► CommandBuffer (deferred ops)
-VECSSystem (Node, virtuals)         ───────────► SystemScheduler (groups/topo)
-VECSObserver (Node, event hooks)    ───────────► ObserverDispatch
-VECSBinaryBuffer / snapshot APIs    ───────────► BinaryBuffer / snapshot
-VECSNetworkSync (Node, RPC)         ───────────► VECSSyncStrategy (pluggable)
-                                                └─ VECSSnapshotReplication (default)
+VECSWorld (Node / "VECS" singleton)  ──────────► World
+VECSEntity (RefCounted handle)       ──────────► Entity (64-bit layered id)
+VECSComponent (field accessor)       ──────────► Archetype (SoA columns)
+VECSComponentType (schema metadata)  ──────────► ComponentRegistry / ComponentSchema
+VECSQueryBuilder (fluent)            ──────────► Query / QueryCache
+VECSCommandBuffer                    ──────────► CommandBuffer (deferred ops)
+VECSSystem (Node, virtuals)          ──────────► SystemScheduler (groups/topo)
+VECSObserver (Node, event hooks)     ──────────► ObserverDispatch
+VECSWorld snapshot methods           ──────────► BinaryBuffer / snapshot (internal)
+VECSNetworkSync (Node, RPC)          ──────────► VECSSyncStrategy (pluggable)
+                                                 └─ VECSSnapshotReplication (default)
 ```
+
+> Note: binary/JSON snapshot serialization lives on `VECSWorld`
+> (`serialize_snapshot()` / `serialize_snapshot_json()` and their
+> `deserialize_*` counterparts) and maps to the internal
+> `vortaris::BinaryBuffer` / snapshot codec — there is **no** `VECSBinaryBuffer`
+> class.
 
 ## Build (Windows / MSVC)
 
@@ -79,14 +92,16 @@ git clone -b 4.7 https://github.com/godotengine/godot-cpp.git godot-cpp
 pip install scons
 ```
 
-Then build the static library and the plugin (adjust `GODOT_CPP_PATH` in `SConstruct` to point at your checkout):
+Then build the static library and the plugin. Point the plugin build at your
+checkout with `godot_cpp_path=<path-to-godot-cpp>` (or the `GODOT_CPP_PATH`
+env var; SConstruct also probes common sibling locations):
 
 ```bash
 cd godot-cpp
 scons platform=windows target=template_debug arch=x86_64
 scons platform=windows target=template_release arch=x86_64   # for release exports
 cd <this repo>
-scons platform=windows target=template_debug arch=x86_64 build_library=False
+scons platform=windows target=template_debug arch=x86_64 build_library=False godot_cpp_path=<path-to-godot-cpp>
 ```
 
 Output lands in `demo/addons/vortarisecs/bin/vortarisecs.windows.*.dll`. The first time you open `demo/` in Godot, the editor generates `.godot/extension_list.cfg` (this registers the extension).

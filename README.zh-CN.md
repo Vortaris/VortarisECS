@@ -6,6 +6,8 @@
 
 设计参考：[GECS](https://github.com/BlockBreaker-Studios/GECS) —— 其 archetype SoA 存储、分层实体 id、延迟命令缓冲、查询构建器、观察者与分层网络同步模式均移植到了原生 C++。
 
+> **API 权威参考**：[`doc_classes/*.xml`](doc_classes/) 中的类参考是 GDScript API 的事实标准（会编译进编辑器的 F1 帮助）。若本 README 与 `doc_classes/` 不一致，以 `doc_classes/` 为准。
+
 ## 特性
 
 - **纯 C++ 数据组件** —— 组件是平凡可拷贝的结构体，存储在缓存友好的 archetype 列（SoA）中。声明式 schema 宏把字段暴露给 GDScript 访问和二进制序列化。
@@ -37,7 +39,8 @@
 - **观察者过滤** —— 字段级 CHANGED 订阅（`set_fields`）与变更时钟节流（`set_throttle_tick`）。
 - **网络加固** —— 写入前先校验包（截断 / 未知 schema / id 冲突的包被丢弃，无部分状态）；`sync_priority` 现可节流增量发送（REALTIME / HIGH 20 Hz / MEDIUM 10 Hz / LOW 2 Hz）。
 - **ChangeView 优化** —— `take()` 通过逐列 max-version 快路径跳过未变化的 archetype，并从世界写日志增量收集（结果一致，快得多）。
-- **健壮性** —— 变更时钟扩为 64 位；实体代数回绕守卫；干净退出，消除全部退出期警告/泄漏。
+- **StringFixed** —— 写入按固定容量在 UTF-8 码点边界截断（只保留完整字符）并告警；`count == 0` 存储空字符串。
+- **健壮性** —— `shutdown()` 重置瞬态状态（延迟操作、变更基线、观察者派发、系统调度器），世界可复用；变更时钟扩为 64 位；实体代数回绕守卫；干净退出，消除全部退出期警告/泄漏。
 - **工具** —— `get_debug_stats()`、`VECSQueryBuilder.get_last_execution_time_usec()`，以及编辑器检查器 Dock。
 
 ## 架构
@@ -45,17 +48,20 @@
 ```
 GDScript 层（VECS 前缀类）                C++ 核心（namespace vortaris）
 ─────────────────────────────────────      ─────────────────────────────
-VECSWorld（Node / "VECS" 单例） ──────────► World
-VECSEntity（RefCounted 句柄）   ──────────► Entity（64 位分层 id）
-VECSComponent（字段访问器）     ──────────► Archetype（SoA 列）
-VECSQueryBuilder（链式）        ──────────► Query / QueryCache
-VECSCommandBuffer               ──────────► CommandBuffer（延迟操作）
-VECSSystem（Node，虚方法）      ──────────► SystemScheduler（分组/拓扑）
-VECSObserver（Node，事件钩子）  ──────────► ObserverDispatch
-VECSBinaryBuffer / 快照 API     ──────────► BinaryBuffer / snapshot
-VECSNetworkSync（Node，RPC）    ──────────► VECSSyncStrategy（可插拔）
-                                                └─ VECSSnapshotReplication（默认）
+VECSWorld（Node / "VECS" 单例）   ──────────► World
+VECSEntity（RefCounted 句柄）     ──────────► Entity（64 位分层 id）
+VECSComponent（字段访问器）       ──────────► Archetype（SoA 列）
+VECSComponentType（schema 元数据） ──────────► ComponentRegistry / ComponentSchema
+VECSQueryBuilder（链式）          ──────────► Query / QueryCache
+VECSCommandBuffer                 ──────────► CommandBuffer（延迟操作）
+VECSSystem（Node，虚方法）        ──────────► SystemScheduler（分组/拓扑）
+VECSObserver（Node，事件钩子）    ──────────► ObserverDispatch
+VECSWorld 快照方法                ──────────► BinaryBuffer / snapshot（内部）
+VECSNetworkSync（Node，RPC）      ──────────► VECSSyncStrategy（可插拔）
+                                                 └─ VECSSnapshotReplication（默认）
 ```
+
+> 注：二进制/JSON 快照序列化都在 `VECSWorld` 上（`serialize_snapshot()` / `serialize_snapshot_json()` 及其 `deserialize_*` 对应方法），映射到内部的 `vortaris::BinaryBuffer` / snapshot 编解码器——**不存在** `VECSBinaryBuffer` 类。
 
 ## 构建（Windows / MSVC）
 
@@ -66,17 +72,17 @@ git clone -b 4.7 https://github.com/godotengine/godot-cpp.git godot-cpp
 pip install scons
 ```
 
-然后构建静态库与插件（把 `SConstruct` 里的 `GODOT_CPP_PATH` 指向你的 checkout，或加 `godot_cpp_path=` 参数）：
+然后构建静态库与插件。把插件构建指向你的 checkout 用 `godot_cpp_path=<path-to-godot-cpp>`（或 `GODOT_CPP_PATH` 环境变量；SConstruct 也会探测常见兄弟目录）：
 
 ```bash
 cd godot-cpp
 scons platform=windows target=template_debug arch=x86_64
 scons platform=windows target=template_release arch=x86_64   # 供 release 导出
 cd <此仓库>
-scons platform=windows target=template_debug arch=x86_64 build_library=False
+scons platform=windows target=template_debug arch=x86_64 build_library=False godot_cpp_path=<path-to-godot-cpp>
 ```
 
-输出在 `demo/bin/vortarisecs.windows.*.dll`。第一次在 Godot 中打开 `demo/` 时，编辑器会生成 `.godot/extension_list.cfg`（注册扩展）。
+输出在 `demo/addons/vortarisecs/bin/vortarisecs.windows.*.dll`。第一次在 Godot 中打开 `demo/` 时，编辑器会生成 `.godot/extension_list.cfg`（注册扩展）。
 
 运行 demo（功能 + 性能）：
 

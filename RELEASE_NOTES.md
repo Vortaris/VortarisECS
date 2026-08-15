@@ -54,6 +54,9 @@ headless/AI-friendly CLI, tiered logging, and AI-facing documentation.
 - Query ergonomics: `find_by_components`, `where`, `order_by`, `order_by_id`.
 - Fixed-array fields (`get_field_count` / `get_array_element` /
   `set_array_element`; array type metadata on `VECSComponentType`).
+- `StringFixed` writes are truncated to the fixed capacity on a UTF-8 code-point
+  boundary (whole characters only, with a warning); `count == 0` stores an empty
+  string.
 - Id mapping (`spawn_from_data_mapped` / `deserialize_snapshot_json_mapped` /
   `remap_reference`) and `"parent"` auto-parenting.
 - Entity pooling (`create_entity_pooled` / `destroy_entity_pooled` /
@@ -77,3 +80,6 @@ headless/AI-friendly CLI, tiered logging, and AI-facing documentation.
 ### Tooling
 - `get_debug_stats()`, `VECSQueryBuilder.get_last_execution_time_usec()`,
   editor inspector dock.
+- `VECSWorld.shutdown()` — resets transient state (deferred ops, change
+  baselines, observer dispatch, scheduler) so a world can be reused; also run at
+  extension teardown to remove exit-time warnings/leaks.
