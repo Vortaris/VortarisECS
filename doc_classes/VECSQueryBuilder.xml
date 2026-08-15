@@ -73,6 +73,14 @@
 				执行查询并返回第一个匹配实体（无匹配则返回空句柄）。遵守与 [method execute] 相同的过滤器，包括 [method changed]。
 			</description>
 		</method>
+		<method name="get_last_execution_time_usec" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of microseconds spent in the most recent [method execute] call. [code]0[/code] until the first execution. Useful for profiling and the editor inspector.
+
+				返回最近一次 [method execute] 调用所花费的微秒数。首次执行前为 [code]0[/code]。可用于性能分析与编辑器检查器。
+			</description>
+		</method>
 		<method name="order_by">
 			<return type="VECSQueryBuilder" />
 			<param index="0" name="comp" type="String" />

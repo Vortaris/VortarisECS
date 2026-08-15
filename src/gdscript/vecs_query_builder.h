@@ -45,6 +45,8 @@ public:
 	godot::Array execute();
 	godot::Ref<VECSEntity> execute_one();
 	int64_t count();
+	// Microseconds spent in the most recent execute() call (debug/stats).
+	int64_t get_last_execution_time_usec() const { return last_exec_usec_; }
 
 protected:
 	static void _bind_methods();
@@ -60,6 +62,7 @@ private:
 	godot::String order_comp_;
 	godot::String order_field_;
 	bool order_by_id_ = false;
+	int64_t last_exec_usec_ = 0;
 
 	std::vector<vortaris::ComponentTypeId> resolve(const godot::Array &p_names) const;
 	vortaris::Query _compile_query() const;

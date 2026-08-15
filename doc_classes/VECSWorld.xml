@@ -56,12 +56,30 @@
 				释放已不含任何实体的 archetype 并回收内存。若大量组件集已清空，可周期性调用（例如场景切换后）。
 			</description>
 		</method>
+		<method name="copy_entity_to">
+			<return type="Dictionary" />
+			<param index="0" name="entity" type="VECSEntity" />
+			<param index="1" name="target" type="VECSWorld" />
+			<description>
+				Copies [param entity] (every component, with field values) from the world it belongs to into [param target]. The target keeps the source id when its slot is free, otherwise a fresh id is assigned. Returns [code]{source_id: target_id}[/code]. Copying into the same world clones the entity (buffered through the command buffer).
+
+				把 [param entity]（全部组件及其字段值）从它所属的世界复制到 [param target]。目标世界在槽位空闲时保留源 id，否则分配新 id。返回 [code]{source_id: target_id}[/code]。复制到同一世界会克隆该实体（经命令缓冲提交）。
+			</description>
+		</method>
 		<method name="create_entity">
 			<return type="VECSEntity" />
 			<description>
 				Creates a new entity with no components and returns a handle to it. Components can then be added with [method VECSEntity.add_component] or via the convenience [method spawn].
 
 				创建一个不含组件的实体并返回其句柄。之后可用 [method VECSEntity.add_component] 或便捷方法 [method spawn] 添加组件。
+			</description>
+		</method>
+		<method name="create_entity_pooled">
+			<return type="VECSEntity" />
+			<description>
+				Creates an entity, reusing a slot reclaimed by [method destroy_entity_pooled] when one is available. Pooled recycling does NOT bump the id generation, so a stale handle captured before the pooled destroy stays valid if the slot is reused (documented trade-off). Pooled slots are never handed out by the regular allocators.
+
+				创建实体；若有 [method destroy_entity_pooled] 回收的槽位则复用。池化回收不 bump id 代数，因此在池化销毁前捕获的过期句柄在槽位复用后仍然有效（文档注明的取舍）。池化槽位不会被常规分配器发出。
 			</description>
 		</method>
 		<method name="create_entity_preassigned">
@@ -109,6 +127,15 @@
 				立即销毁 [param entity]（非延迟），并为其每个组件派发 REMOVED 事件。若实体已销毁则为空操作。若要在迭代内销毁，请改用 [method VECSCommandBuffer.remove_entity]。
 			</description>
 		</method>
+		<method name="destroy_entity_pooled">
+			<return type="void" />
+			<param index="0" name="entity" type="VECSEntity" />
+			<description>
+				Destroys [param entity] and reclaims its id for [method create_entity_pooled], WITHOUT bumping the id generation. The slot is reserved for pooled reuse and never handed out by the regular allocators, so a stale handle stays valid after a pooled reuse. Dispatches a REMOVED event per component.
+
+				销毁 [param entity] 并把其 id 回收给 [method create_entity_pooled]，且不 bump id 代数。槽位保留给池化复用，不会由常规分配器发出，因此池化复用后过期句柄仍有效。按组件派发 REMOVED 事件。
+			</description>
+		</method>
 		<method name="each">
 			<return type="void" />
 			<param index="0" name="components" type="Array" />
@@ -120,14 +147,14 @@
 			</description>
 		</method>
 		<method name="emit_event">
-			<return type="void" />
+			<return type="int" />
 			<param index="0" name="name" type="String" />
 			<param index="1" name="entity" type="VECSEntity" />
 			<param index="2" name="payload" type="Variant" default="null" />
 			<description>
-				Broadcasts a custom event to observers that subscribe to [code]name[/code]. [param payload] is passed through unchanged; [param entity] may be a null handle for events that do not concern a specific entity.
+				Broadcasts a custom event to observers that subscribe to [code]name[/code]. [param payload] is passed through unchanged; [param entity] may be a null handle for events that do not concern a specific entity. Returns the number of observer callbacks that received the event.
 
-				向订阅了 [code]name[/code] 的观察者广播自定义事件。[param payload] 原样传递；与特定实体无关的事件，[param entity] 可为空句柄。
+				向订阅了 [code]name[/code] 的观察者广播自定义事件。[param payload] 原样传递；与特定实体无关的事件，[param entity] 可为空句柄。返回实际接收到该事件的观察者回调数量。
 			</description>
 		</method>
 		<method name="entities_to_data">
@@ -173,6 +200,14 @@
 				返回注册名为 [param name] 的组件类型的元数据；未注册则返回空句柄。返回的 [VECSComponentType] 暴露字段名、大小与同步优先级。
 			</description>
 		</method>
+		<method name="get_debug_stats" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns a [Dictionary] of world statistics for tooling and the editor inspector: [code]entity_count[/code], [code]archetype_count[/code], [code]component_count[/code], [code]observer_count[/code], [code]change_tick[/code], [code]pool_size[/code] and [code]query_cache_entries[/code].
+
+				返回供工具与编辑器检查器使用的一个 [Dictionary] 世界统计：[code]entity_count[/code]、[code]archetype_count[/code]、[code]component_count[/code]、[code]observer_count[/code]、[code]change_tick[/code]、[code]pool_size[/code] 与 [code]query_cache_entries[/code]。
+			</description>
+		</method>
 		<method name="get_field">
 			<return type="Variant" />
 			<param index="0" name="entity" type="VECSEntity" />
@@ -209,6 +244,43 @@
 				Returns [code]true[/code] if [param entity] refers to a live entity in this world. Stale handles (from a destroyed or recycled entity) return [code]false[/code].
 
 				若 [param entity] 指向本世界中的一个存活实体则返回 [code]true[/code]。过期句柄（来自已销毁或已回收的实体）返回 [code]false[/code]。
+			</description>
+		</method>
+		<method name="merge_world">
+			<return type="Dictionary" />
+			<param index="0" name="source" type="VECSWorld" />
+			<description>
+				Merges every entity of [param source] into this world, returning the total [code]{source_id: target_id}[/code] mapping (see [method copy_entity_to]). Passing this world as [param source] clones it. Entities whose ids conflict in the target get fresh ids; the mapping records the correspondence.
+
+				把 [param source] 的所有实体合并到本世界，返回总 [code]{source_id: target_id}[/code] 映射（见 [method copy_entity_to]）。把本世界作为 [param source] 传入即克隆自身。在目标中 id 冲突的实体获得新 id；映射记录对应关系。
+			</description>
+		</method>
+		<method name="off">
+			<return type="void" />
+			<param index="0" name="subscription_id" type="int" />
+			<description>
+				Unsubscribes a field subscription created by [method on_field_changed].
+
+				注销由 [method on_field_changed] 创建的字段订阅。
+			</description>
+		</method>
+		<method name="on_field_changed">
+			<return type="int" />
+			<param index="0" name="comp" type="String" />
+			<param index="1" name="field" type="String" />
+			<param index="2" name="callable" type="Callable" />
+			<description>
+				Subscribes to value changes of one component field. The callback [code]callable(entity, value)[/code] fires only when the field actually changed value since the last delivery (a write of the same value does not fire). Returns a subscription id usable with [method off].
+
+				订阅单个组件字段的值变化。仅当字段自上次派发以来真正改变值时，回调 [code]callable(entity, value)[/code] 才触发（写入相同值不触发）。返回可用 [method off] 注销的订阅 id。
+			</description>
+		</method>
+		<method name="pool_size" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of entity ids currently sitting in the pool, awaiting reuse by [method create_entity_pooled].
+
+				返回当前位于池中、等待 [method create_entity_pooled] 复用的实体 id 数量。
 			</description>
 		</method>
 		<method name="process">
@@ -336,9 +408,13 @@
 			<return type="Array" />
 			<param index="0" name="entities" type="Array" />
 			<description>
-				Batch-creates entities from data: [code][{"id"?: int, "components": {"Name": {field: value}}}, ...][/code]. Entities that fail to spawn (e.g. an id conflict) are skipped. Returns the array of created [VECSEntity] handles.
+				Batch-creates entities from data: [code][{"id"?: int, "parent"?: int, "components": {"Name": {field: value}}}, ...][/code]. Entities that fail to spawn (e.g. an id conflict) are skipped. Returns the array of created [VECSEntity] handles.
 
-				从数据批量创建实体：[code][{"id"?: int, "components": {"Name": {field: value}}}, ...][/code]。生成失败的实体（例如 id 冲突）会被跳过。返回创建出的 [VECSEntity] 句柄数组。
+				An entry may carry a [code]parent[/code] key whose value is the source id or array index of another entity in the same batch; after the batch, the child's field literally named [code]parent[/code] (on any of its components) is automatically rewritten to the freshly assigned parent id.
+
+				从数据批量创建实体：[code][{"id"?: int, "parent"?: int, "components": {"Name": {field: value}}}, ...][/code]。生成失败的实体（例如 id 冲突）会被跳过。返回创建出的 [VECSEntity] 句柄数组。
+
+				条目可带 [code]parent[/code] 键，值为同批另一实体的源 id 或数组下标；批量结束后，子实体上字段名为 [code]parent[/code]（在其任一组件上）的引用会自动改写为新建父实体的 id。
 			</description>
 		</method>
 		<method name="spawn_from_data_mapped">
@@ -350,12 +426,31 @@
 				类似 [method spawn_from_data]，但额外返回 id 映射 [code]{source_id_or_index: new_id}[/code]。带显式 [code]id[/code] 的条目以该 id 为键；无 id 的条目以数组下标为键。把映射传给 [method remap_reference] 可在批量后改写跨实体引用。
 			</description>
 		</method>
+		<method name="subscribe_event">
+			<return type="int" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="callable" type="Callable" />
+			<description>
+				Subscribes to custom events with the given [param name]. The callback [code]callable(entity, payload)[/code] runs for every matching event broadcast with [method emit_event]. Returns a subscription id usable with [method unsubscribe_event].
+
+				订阅名为 [param name] 的自定义事件。每次 [method emit_event] 广播匹配事件时，回调 [code]callable(entity, payload)[/code] 都会执行。返回可用 [method unsubscribe_event] 注销的订阅 id。
+			</description>
+		</method>
 		<method name="system_count" qualifiers="const">
 			<return type="int" />
 			<description>
 				Returns the number of registered systems.
 
 				返回已注册系统的数量。
+			</description>
+		</method>
+		<method name="unsubscribe_event">
+			<return type="void" />
+			<param index="0" name="subscription_id" type="int" />
+			<description>
+				Unsubscribes a custom-event subscription created by [method subscribe_event].
+
+				注销由 [method subscribe_event] 创建的自定义事件订阅。
 			</description>
 		</method>
 	</methods>

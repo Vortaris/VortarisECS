@@ -102,6 +102,52 @@ void World::destroy_entity_deferred(Entity p_e) {
 	destroy_entity(p_e);
 }
 
+Entity World::create_entity_pooled() {
+	if (!pool_slots_.empty()) {
+		Entity e = pool_slots_.back();
+		pool_slots_.pop_back();
+		// Reuse the exact id (same slot + generation): the id never went through
+		// _free_entity_id, so no generation bump happened and stale handles stay
+		// valid after reuse.
+		uint32_t row = empty_archetype_->add_entity(e, change_tick_);
+		entity_locations_[e] = { empty_archetype_, row };
+		_invalidate_cache();
+		return e;
+	}
+	return create_entity();
+}
+
+void World::destroy_entity_pooled(Entity p_e) {
+	auto it = entity_locations_.find(p_e);
+	if (it == entity_locations_.end()) {
+		return;
+	}
+	if (in_iteration()) {
+		ERR_PRINT("VortarisECS: destroy_entity_pooled() during for_each/view iteration is unsafe; defer it via commands().");
+		return;
+	}
+	Archetype *a = it->second.archetype;
+	std::vector<ComponentTypeId> removed_types = a->component_ids;
+	uint32_t removed_row = it->second.row;
+	Entity moved = a->remove_entity(p_e);
+	entity_locations_.erase(it);
+	if (moved) {
+		auto mit = entity_locations_.find(moved);
+		if (mit != entity_locations_.end()) {
+			mit->second.row = removed_row;
+		}
+	}
+	// Reclaim the id WITHOUT bumping its generation. The slot is reserved for
+	// pooled reuse (create_entity_pooled) and never handed out by the regular
+	// allocator, so a handle captured before the pooled destroy stays valid if
+	// the slot is reused.
+	pool_slots_.push_back(p_e);
+	for (ComponentTypeId t : removed_types) {
+		observer_dispatch_.dispatch(ObserverEventType::Removed, p_e, t, godot::String(), godot::Variant());
+	}
+	_invalidate_cache();
+}
+
 bool World::is_alive(Entity p_e) const {
 	return p_e && entity_locations_.count(p_e) > 0;
 }
@@ -284,8 +330,8 @@ void World::get_entity_component_types(Entity p_e, std::vector<ComponentTypeId> 
 	r_out.assign(a->component_ids.begin(), a->component_ids.end());
 }
 
-void World::emit_event(const godot::String &p_name, Entity p_e, const godot::Variant &p_payload) {
-	observer_dispatch_.dispatch(ObserverEventType::Custom, p_e, 0, p_name, p_payload);
+int World::emit_event(const godot::String &p_name, Entity p_e, const godot::Variant &p_payload) {
+	return observer_dispatch_.dispatch(ObserverEventType::Custom, p_e, 0, p_name, p_payload);
 }
 
 // ----------------------------------------------------------- command api --
@@ -412,6 +458,7 @@ void World::reset() {
 	custom_commands_.clear();
 	change_log_.clear();
 	change_log_pos_ = 0;
+	pool_slots_.clear();
 	suppress_depth_ = 0;
 	iteration_depth_ = 0;
 	pending_cache_invalidation_ = false;

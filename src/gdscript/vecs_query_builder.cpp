@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/string_name.hpp>
@@ -109,6 +110,7 @@ uint64_t VECSQueryBuilder::_baseline_key(const vortaris::Query &p_q) const {
 
 godot::Array VECSQueryBuilder::execute() {
 	godot::Array result;
+	const uint64_t t0 = godot::Time::get_singleton()->get_ticks_usec();
 	if (!world_) {
 		return result;
 	}
@@ -180,6 +182,7 @@ godot::Array VECSQueryBuilder::execute() {
 	if (has_changed_filter) {
 		world_->set_changed_baseline(key, world_->change_tick());
 	}
+	last_exec_usec_ = static_cast<int64_t>(godot::Time::get_singleton()->get_ticks_usec() - t0);
 	return result;
 }
 
@@ -285,4 +288,5 @@ void VECSQueryBuilder::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("execute"), &VECSQueryBuilder::execute);
 	ClassDB::bind_method(D_METHOD("execute_one"), &VECSQueryBuilder::execute_one);
 	ClassDB::bind_method(D_METHOD("count"), &VECSQueryBuilder::count);
+	ClassDB::bind_method(D_METHOD("get_last_execution_time_usec"), &VECSQueryBuilder::get_last_execution_time_usec);
 }

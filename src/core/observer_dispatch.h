@@ -48,8 +48,11 @@ class ObserverDispatch {
 public:
 	ObserverId add(ObserverCallback p_cb);
 	void remove(ObserverId p_id);
-	void dispatch(ObserverEventType p_type, Entity p_e, ComponentTypeId p_comp, const godot::String &p_event_name, const godot::Variant &p_payload);
+	// Dispatches to every matching callback; returns the number of callbacks that
+	// actually ran (used by the event bus to report the receive count).
+	int dispatch(ObserverEventType p_type, Entity p_e, ComponentTypeId p_comp, const godot::String &p_event_name, const godot::Variant &p_payload);
 	void clear();
+	size_t count() const { return callbacks_ ? callbacks_->size() : 0; }
 	bool is_empty() const { return !callbacks_ || callbacks_->empty(); }
 
 private:

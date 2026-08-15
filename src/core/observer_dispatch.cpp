@@ -52,14 +52,15 @@ void ObserverDispatch::remove(ObserverId p_id) {
 	callbacks_ = std::make_shared<const std::vector<ObserverCallback>>(std::move(copy));
 }
 
-void ObserverDispatch::dispatch(ObserverEventType p_type, Entity p_e, ComponentTypeId p_comp, const godot::String &p_event_name, const godot::Variant &p_payload) {
+int ObserverDispatch::dispatch(ObserverEventType p_type, Entity p_e, ComponentTypeId p_comp, const godot::String &p_event_name, const godot::Variant &p_payload) {
 	if (!callbacks_ || callbacks_->empty()) {
-		return;
+		return 0;
 	}
 	// COW snapshot: dispatch copies only the shared_ptr (atomic refcount), and
 	// observers may register/unregister during delivery (re-entrancy safe).
 	auto snapshot = callbacks_;
 	uint32_t bit = event_bit(p_type);
+	int delivered = 0;
 	for (const ObserverCallback &cb : *snapshot) {
 		if (!(cb.event_mask & bit)) {
 			continue;
@@ -75,8 +76,10 @@ void ObserverDispatch::dispatch(ObserverEventType p_type, Entity p_e, ComponentT
 		}
 		if (cb.fn) {
 			cb.fn(p_type, p_e, p_comp, p_event_name, p_payload);
+			++delivered;
 		}
 	}
+	return delivered;
 }
 
 } // namespace vortaris

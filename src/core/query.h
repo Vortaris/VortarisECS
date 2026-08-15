@@ -33,6 +33,8 @@ public:
 	void register_new_archetype(Archetype *p_a);
 	void erase_archetype(Archetype *p_a);
 	void invalidate();
+	// Number of distinct compiled queries currently cached (debug/stats).
+	size_t cached_query_count() const { return cache_.size(); }
 
 private:
 	std::unordered_map<uint64_t, std::vector<Archetype *>> cache_;

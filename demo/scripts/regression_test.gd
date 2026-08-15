@@ -28,6 +28,11 @@ extends SceneTree
 #   T23 array-field element access (component + component type)
 #   T24 where predicate + order_by / order_by_id
 #   T25 spawn_from_data_mapped / deserialize_snapshot_json_mapped + remap_reference
+#   T26 entity pooling (no generation bump)
+#   T27 cross-world copy / merge (including self-merge)
+#   T28 on_field_changed value-compared subscription + off
+#   T29 event bus: subscribe_event / unsubscribe_event / emit return count
+#   T30 get_debug_stats + query execution time
 
 const EcsTestUtil := preload("res://scripts/ecs_test_util.gd")
 
@@ -56,6 +61,11 @@ func _initialize() -> void:
 	_test_t23_array_element(t)
 	_test_t24_where_order(t)
 	_test_t25_id_mapping(t)
+	_test_t26_pooling(t)
+	_test_t27_merge(t)
+	_test_t28_on_field_changed(t)
+	_test_t29_event_bus(t)
+	_test_t30_debug_stats(t)
 	print("total=", t.total, " failures=", t.failures)
 	if t.failures == 0:
 		print("=== VortarisECS Regression OK ===")
@@ -697,4 +707,130 @@ func _test_t25_id_mapping(t: RefCounted) -> void:
 	t.expect_eq(int(first.get_component("T25B").get_field("target")), int(m2[0]), "T25: index 0 remapped to first new id")
 	t.expect_eq(int(second.get_component("T25B").get_field("target")), int(m2[1]), "T25: index 1 remapped to second new id")
 	w2.free()
+
+	# Auto-parenting: an entry with a "parent" key has its "parent" field
+	# rewritten to the freshly assigned parent id after the batch.
+	var wp: VECSWorld = VECSWorld.new()
+	wp.register_component("T25P", [{"name": "parent", "type": "I64"}])
+	var mp2: Dictionary = wp.spawn_from_data_mapped([
+		{"components": {"T25P": {"parent": 0}}},           # parent, index 0
+		{"parent": 0, "components": {"T25P": {"parent": 0}}},  # child, references parent by index
+	])
+	var parents: Array = wp.query().with_all(["T25P"]).execute()
+	var child: VECSEntity = parents[1]
+	t.expect_eq(int(child.get_component("T25P").get_field("parent")), int(mp2[0]), "T25: auto-parent rewrote child reference")
+	wp.free()
+	w.free()
+
+
+# T26: pooled entities recycle ids without bumping generation; pooled slots are
+# never handed out by the regular allocator.
+func _test_t26_pooling(t: RefCounted) -> void:
+	print("-- T26: entity pooling --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T26C", [{"name": "v", "type": "I32"}])
+	var e: VECSEntity = w.create_entity_pooled()
+	e.add_component("T26C", {"v": 5})
+	var eid: int = e.get_id()
+	w.destroy_entity_pooled(e)
+	t.expect_eq(int(w.pool_size()), 1, "T26: pooled destroy reclaims the id")
+	t.expect_eq(w.entity(eid), null, "T26: entity dead after pooled destroy")
+	var e2: VECSEntity = w.create_entity_pooled()
+	t.expect_eq(e2.get_id(), eid, "T26: pooled create reuses the same id")
+	t.expect_eq(int(w.pool_size()), 0, "T26: pool empty after reuse")
+	t.expect_eq(e.is_alive(), true, "T26: stale handle valid after pooled reuse (no generation bump)")
+	t.expect(e2.has_component("T26C") == false, "T26: pooled entity starts with no components")
+	w.destroy_entity_pooled(e2)
+	var e3: VECSEntity = w.create_entity()
+	t.expect(e3.get_id() != eid, "T26: create_entity does not reuse pooled slot")
+	w.free()
+
+
+# T27: copy_entity_to / merge_world across worlds, and self-merge (clone).
+func _test_t27_merge(t: RefCounted) -> void:
+	print("-- T27: cross-world copy/merge --")
+	var src: VECSWorld = VECSWorld.new()
+	src.register_component("T27C", [{"name": "v", "type": "F32"}])
+	var se: VECSEntity = src.create_entity()
+	se.add_component("T27C", {"v": 7.0})
+	var dst: VECSWorld = VECSWorld.new()
+	var m: Dictionary = src.copy_entity_to(se, dst)
+	t.expect_eq(m.size(), 1, "T27: copy returns a mapping")
+	t.expect(int(m[se.get_id()]) > 0, "T27: target id positive")
+	var dq: Array = dst.query().with_all(["T27C"]).execute()
+	t.expect_eq(dq.size(), 1, "T27: target has the copied entity")
+	t.expect_eq(float(dq[0].get_component("T27C").get_field("v")), 7.0, "T27: copied field value")
+	var dst2: VECSWorld = VECSWorld.new()
+	var total: Dictionary = dst2.merge_world(src)
+	t.expect_eq(total.size(), 1, "T27: merge maps the source entity")
+	t.expect_eq(int(dst2.entity_count()), 1, "T27: merge copied the entity")
+	var total_self: Dictionary = src.merge_world(src)
+	t.expect_eq(total_self.size(), 1, "T27: self-merge maps the source")
+	t.expect_eq(int(src.entity_count()), 2, "T27: self-merge clones the entity")
+	src.free()
+	dst.free()
+	dst2.free()
+
+
+# T28: on_field_changed compares values before firing; off() unsubscribes.
+func _test_t28_on_field_changed(t: RefCounted) -> void:
+	print("-- T28: on_field_changed value subscription --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T28C", [{"name": "x", "type": "F32"}])
+	var events := []
+	var sid: int = w.on_field_changed("T28C", "x", func(ent: VECSEntity, value: Variant) -> void:
+		events.append([ent.get_id(), value]))
+	t.expect(sid > 0, "T28: subscription id returned")
+	var e: VECSEntity = w.create_entity()
+	e.add_component("T28C", {"x": 0.0})
+	t.expect_eq(events.size(), 0, "T28: add_component does not fire field change")
+	e.get_component("T28C").set_field("x", 1.0)
+	t.expect_eq(events.size(), 1, "T28: real value change fires")
+	t.expect_eq(float(events[0][1]), 1.0, "T28: callback receives the new value")
+	e.get_component("T28C").set_field("x", 1.0)
+	t.expect_eq(events.size(), 1, "T28: same value does not fire again")
+	w.off(sid)
+	e.get_component("T28C").set_field("x", 2.0)
+	t.expect_eq(events.size(), 1, "T28: off() unsubscribes")
+	w.free()
+
+
+# T29: event bus — subscribe_event / unsubscribe_event and the emit count.
+func _test_t29_event_bus(t: RefCounted) -> void:
+	print("-- T29: event bus --")
+	var w: VECSWorld = VECSWorld.new()
+	var received := []
+	var sid: int = w.subscribe_event("hello", func(ent: VECSEntity, payload: Variant) -> void:
+		received.append(payload))
+	t.expect(sid > 0, "T29: event subscription id")
+	var e: VECSEntity = w.create_entity()
+	var n: int = w.emit_event("hello", e, {"n": 1})
+	t.expect_eq(n, 1, "T29: emit_event returns receiver count")
+	t.expect_eq(received.size(), 1, "T29: event received")
+	t.expect_eq(int(received[0]["n"]), 1, "T29: payload passed through")
+	w.emit_event("world", e, {})
+	t.expect_eq(received.size(), 1, "T29: other-name event not received")
+	w.unsubscribe_event(sid)
+	var n2: int = w.emit_event("hello", e, {})
+	t.expect_eq(n2, 0, "T29: unsubscribed event has no receivers")
+	t.expect_eq(received.size(), 1, "T29: no more events after unsubscribe")
+	w.free()
+
+
+# T30: get_debug_stats dictionary + query execution time.
+func _test_t30_debug_stats(t: RefCounted) -> void:
+	print("-- T30: debug stats --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T30C", [{"name": "v", "type": "I32"}])
+	for i in 3:
+		var e: VECSEntity = w.create_entity()
+		e.add_component("T30C", {"v": i})
+	var stats: Dictionary = w.get_debug_stats()
+	t.expect_eq(int(stats["entity_count"]), 3, "T30: entity_count in stats")
+	t.expect(int(stats["archetype_count"]) >= 2, "T30: archetype_count in stats")
+	t.expect(int(stats["component_count"]) >= 1, "T30: component_count in stats")
+	t.expect(int(stats["change_tick"]) > 0, "T30: change_tick in stats")
+	var q: VECSQueryBuilder = w.query().with_all(["T30C"])
+	q.execute()
+	t.expect(int(q.get_last_execution_time_usec()) >= 0, "T30: query exec time reported")
 	w.free()

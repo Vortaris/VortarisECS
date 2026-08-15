@@ -37,6 +37,13 @@ public:
 	// ---- entity ----
 	godot::Ref<VECSEntity> create_entity();
 	godot::Ref<VECSEntity> create_entity_preassigned(int64_t p_id);
+	// Pooled entity API. destroy_entity_pooled reclaims the id without bumping
+	// its generation, so a stale handle stays valid if the slot is reused by
+	// create_entity_pooled (documented trade-off). Pooled slots are never handed
+	// out by the regular allocator.
+	godot::Ref<VECSEntity> create_entity_pooled();
+	void destroy_entity_pooled(const godot::Ref<VECSEntity> &p_entity);
+	int64_t pool_size() const;
 	// Looks up a live entity by its raw 64-bit id. Returns a null handle when
 	// the id is not a live entity in this world (dead, recycled, or <= 0).
 	godot::Ref<VECSEntity> entity(int64_t p_id) const;
@@ -81,7 +88,31 @@ public:
 	// ---- observers / events ----
 	void add_observer(VECSObserver *p_observer);
 	void remove_observer(VECSObserver *p_observer);
-	void emit_event(const godot::String &p_name, const godot::Ref<VECSEntity> &p_entity, const godot::Variant &p_payload);
+	// Broadcasts a custom event; returns the number of observer callbacks that
+	// actually received it.
+	int64_t emit_event(const godot::String &p_name, const godot::Ref<VECSEntity> &p_entity, const godot::Variant &p_payload);
+	// Value-compared field subscription: the callback (entity, new_value) fires
+	// only when the field actually changed value since the last delivery.
+	// Returns a subscription id usable with off().
+	int64_t on_field_changed(const godot::String &p_comp, const godot::String &p_field, const godot::Callable &p_callable);
+	void off(int64_t p_subscription_id);
+	// Custom event subscription: callback (entity, payload) fires for events
+	// with the given name. Returns a subscription id usable with unsubscribe_event().
+	int64_t subscribe_event(const godot::String &p_name, const godot::Callable &p_callable);
+	void unsubscribe_event(int64_t p_subscription_id);
+
+	// ---- cross-world copy / merge ----
+	// Copies one entity (all components) from THIS world into `target_world`.
+	// The target keeps the source id when its slot is free, else a fresh id.
+	// Returns {source_id: target_id}. Copying into the same world clones the
+	// entity (buffered through the command buffer).
+	godot::Dictionary copy_entity_to(const godot::Ref<VECSEntity> &p_entity, VECSWorld *p_target);
+	// Merges every entity of `source_world` into THIS world, returning the total
+	// {source_id: target_id} mapping. source == this clones the whole world.
+	godot::Dictionary merge_world(VECSWorld *p_source);
+
+	// ---- debug ----
+	godot::Dictionary get_debug_stats() const;
 
 	// ---- per-frame driver ----
 	void process(double p_delta, const godot::String &p_group);
@@ -131,6 +162,20 @@ private:
 	// Shared spawn implementation. Fills r_mapping with {source_id_or_index:
 	// new_id} and returns the array of spawned VECSEntity handles.
 	godot::Array _spawn_from_data_impl(const godot::Array &p_entities, godot::Dictionary &r_mapping);
+	void _clear_field_subs();
+	void _clear_event_subs();
+
+	struct FieldSubscription {
+		vortaris::ObserverId observer_id = 0;
+		vortaris::ComponentTypeId comp = 0;
+		godot::StringName field;
+		godot::Callable callable;
+		std::unordered_map<uint64_t, godot::Variant> cached;
+	};
+	std::unordered_map<int64_t, FieldSubscription> field_subs_;
+	int64_t next_field_sub_id_ = 1;
+	std::unordered_map<int64_t, vortaris::ObserverId> event_subs_;
+	int64_t next_event_sub_id_ = 1;
 
 	std::unique_ptr<vortaris::World> core_;
 	std::unique_ptr<vortaris::SystemScheduler> scheduler_;

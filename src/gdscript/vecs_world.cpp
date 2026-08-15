@@ -61,6 +61,21 @@ bool VECSWorld::has_entity(int64_t p_id) const {
 	return core_->is_alive(vortaris::Entity{ static_cast<uint64_t>(p_id) });
 }
 
+godot::Ref<VECSEntity> VECSWorld::create_entity_pooled() {
+	vortaris::Entity e = core_->create_entity_pooled();
+	return VECSEntity::make(core_.get(), e);
+}
+
+void VECSWorld::destroy_entity_pooled(const godot::Ref<VECSEntity> &p_entity) {
+	if (p_entity.is_valid()) {
+		core_->destroy_entity_pooled(p_entity->entity());
+	}
+}
+
+int64_t VECSWorld::pool_size() const {
+	return static_cast<int64_t>(core_->pool_size());
+}
+
 void VECSWorld::destroy_entity(const godot::Ref<VECSEntity> &p_entity) {
 	if (p_entity.is_valid()) {
 		core_->destroy_entity(p_entity->entity());
@@ -252,12 +267,215 @@ void VECSWorld::remove_observer(VECSObserver *p_observer) {
 	p_observer->set_world(nullptr);
 }
 
-void VECSWorld::emit_event(const godot::String &p_name, const godot::Ref<VECSEntity> &p_entity, const godot::Variant &p_payload) {
+int64_t VECSWorld::emit_event(const godot::String &p_name, const godot::Ref<VECSEntity> &p_entity, const godot::Variant &p_payload) {
 	vortaris::Entity e;
 	if (p_entity.is_valid()) {
 		e = p_entity->entity();
 	}
-	core_->emit_event(p_name, e, p_payload);
+	return static_cast<int64_t>(core_->emit_event(p_name, e, p_payload));
+}
+
+int64_t VECSWorld::on_field_changed(const godot::String &p_comp, const godot::String &p_field, const godot::Callable &p_callable) {
+	vortaris::ComponentTypeId t = core_->registry().id_of(godot::StringName(p_comp));
+	if (t == vortaris::INVALID_COMPONENT_TYPE || !p_callable.is_valid()) {
+		return 0;
+	}
+	const int64_t sub_id = next_field_sub_id_++;
+	FieldSubscription sub;
+	sub.comp = t;
+	sub.field = godot::StringName(p_field);
+	sub.callable = p_callable;
+	field_subs_[sub_id] = sub;
+
+	vortaris::ObserverCallback cb;
+	cb.event_mask = vortaris::EVENT_CHANGED;
+	cb.component_filter = { t };
+	cb.watch_all = false;
+	cb.fn = [this, sub_id](vortaris::ObserverEventType p_type, vortaris::Entity p_e, vortaris::ComponentTypeId p_comp, const godot::String &p_name, const godot::Variant &p_payload) {
+		auto it = field_subs_.find(sub_id);
+		if (it == field_subs_.end()) {
+			return;
+		}
+		FieldSubscription &sub = it->second;
+		vortaris::World &w = core();
+		const void *raw = w.get_raw(p_e, sub.comp);
+		if (!raw) {
+			return;
+		}
+		const vortaris::ComponentSchema *s = w.registry().schema_of(sub.comp);
+		if (!s) {
+			return;
+		}
+		const vortaris::FieldDescriptor *fd = s->find_field(sub.field);
+		if (!fd) {
+			return;
+		}
+		godot::Variant value;
+		if (!vortaris::field_to_variant(*fd, static_cast<const uint8_t *>(raw) + fd->offset, value)) {
+			return;
+		}
+		auto cit = sub.cached.find(p_e.id);
+		if (cit != sub.cached.end() && cit->second == value) {
+			return; // value unchanged since last delivery
+		}
+		sub.cached[p_e.id] = value;
+		sub.callable.call(VECSEntity::make(&w, p_e), value);
+	};
+	field_subs_[sub_id].observer_id = core_->observer_dispatch().add(std::move(cb));
+	return sub_id;
+}
+
+void VECSWorld::off(int64_t p_subscription_id) {
+	auto it = field_subs_.find(p_subscription_id);
+	if (it == field_subs_.end()) {
+		return;
+	}
+	if (it->second.observer_id > 0) {
+		core_->observer_dispatch().remove(it->second.observer_id);
+	}
+	field_subs_.erase(it);
+}
+
+void VECSWorld::_clear_field_subs() {
+	for (auto &kv : field_subs_) {
+		if (kv.second.observer_id > 0) {
+			core_->observer_dispatch().remove(kv.second.observer_id);
+		}
+	}
+	field_subs_.clear();
+}
+
+int64_t VECSWorld::subscribe_event(const godot::String &p_name, const godot::Callable &p_callable) {
+	if (!p_callable.is_valid()) {
+		return 0;
+	}
+	const int64_t sub_id = next_event_sub_id_++;
+	vortaris::ObserverCallback cb;
+	cb.event_mask = vortaris::EVENT_CUSTOM;
+	cb.custom_name = p_name;
+	cb.fn = [this, p_callable](vortaris::ObserverEventType p_type, vortaris::Entity p_e, vortaris::ComponentTypeId p_comp, const godot::String &p_name, const godot::Variant &p_payload) {
+		VECSWorld *world = this;
+		godot::Ref<VECSEntity> handle = p_e ? VECSEntity::make(&world->core(), p_e) : godot::Ref<VECSEntity>();
+		p_callable.call(handle, p_payload);
+	};
+	event_subs_[sub_id] = core_->observer_dispatch().add(std::move(cb));
+	return sub_id;
+}
+
+void VECSWorld::unsubscribe_event(int64_t p_subscription_id) {
+	auto it = event_subs_.find(p_subscription_id);
+	if (it == event_subs_.end()) {
+		return;
+	}
+	core_->observer_dispatch().remove(it->second);
+	event_subs_.erase(it);
+}
+
+void VECSWorld::_clear_event_subs() {
+	for (auto &kv : event_subs_) {
+		core_->observer_dispatch().remove(kv.second);
+	}
+	event_subs_.clear();
+}
+
+godot::Dictionary VECSWorld::copy_entity_to(const godot::Ref<VECSEntity> &p_entity, VECSWorld *p_target) {
+	godot::Dictionary result;
+	if (!p_entity.is_valid() || !p_target) {
+		return result;
+	}
+	vortaris::Entity src = p_entity->entity();
+	// The source entity lives in its OWN world, which may differ from this one.
+	vortaris::World *swp = p_entity->world();
+	if (!swp || !swp->is_alive(src)) {
+		return result;
+	}
+	vortaris::World &sw = *swp;
+	vortaris::World &tw = p_target->core();
+
+	// Snapshot the source component data first (source is read-only).
+	struct CompData {
+		vortaris::ComponentTypeId type = 0;
+		std::vector<uint8_t> bytes;
+	};
+	std::vector<CompData> comps;
+	std::vector<vortaris::ComponentTypeId> types;
+	sw.get_entity_component_types(src, types);
+	for (vortaris::ComponentTypeId t : types) {
+		const vortaris::ComponentSchema *s = sw.registry().schema_of(t);
+		const void *raw = sw.get_raw(src, t);
+		if (!s || !raw) {
+			continue;
+		}
+		CompData cd;
+		cd.type = t;
+		cd.bytes.assign(static_cast<const uint8_t *>(raw), static_cast<const uint8_t *>(raw) + s->size);
+		comps.push_back(std::move(cd));
+	}
+
+	vortaris::Entity target_e;
+	if (p_target == this) {
+		// Same-world clone: the source id is occupied, so a fresh id is used.
+		target_e = tw.create_entity();
+	} else {
+		target_e = tw.create_entity_preassigned(src.id);
+		if (!target_e) {
+			target_e = tw.create_entity();
+		}
+	}
+	if (!target_e) {
+		return result;
+	}
+
+	if (p_target == this) {
+		// Buffered through the command buffer, then committed once.
+		for (const CompData &cd : comps) {
+			tw.commands().add_component(target_e, cd.type, cd.bytes.data(), cd.bytes.size());
+		}
+		tw.flush_command_buffers();
+	} else {
+		for (const CompData &cd : comps) {
+			tw.add_raw(target_e, cd.type, cd.bytes.data());
+		}
+	}
+
+	result[static_cast<int64_t>(src.id)] = static_cast<int64_t>(target_e.id);
+	return result;
+}
+
+godot::Dictionary VECSWorld::merge_world(VECSWorld *p_source) {
+	godot::Dictionary total;
+	if (!p_source) {
+		return total;
+	}
+	// Snapshot the source entity ids first so that cloning into the same world
+	// does not disturb the iteration.
+	std::vector<vortaris::Entity> ids;
+	for (const vortaris::Archetype *a : p_source->core().all_archetypes()) {
+		for (size_t row = 0; row < a->entities.size(); ++row) {
+			ids.push_back(a->entities[row]);
+		}
+	}
+	for (vortaris::Entity e : ids) {
+		godot::Ref<VECSEntity> handle = VECSEntity::make(&p_source->core(), e);
+		const godot::Dictionary m = copy_entity_to(handle, this);
+		const godot::Array keys = m.keys();
+		for (int i = 0; i < keys.size(); ++i) {
+			total[keys[i]] = m[keys[i]];
+		}
+	}
+	return total;
+}
+
+godot::Dictionary VECSWorld::get_debug_stats() const {
+	godot::Dictionary out;
+	out["entity_count"] = static_cast<int64_t>(core_->entity_count());
+	out["archetype_count"] = static_cast<int64_t>(core_->all_archetypes().size());
+	out["component_count"] = static_cast<int64_t>(core_->registry().count());
+	out["observer_count"] = static_cast<int64_t>(core_->observer_dispatch().count());
+	out["change_tick"] = static_cast<int64_t>(core_->change_tick());
+	out["pool_size"] = static_cast<int64_t>(core_->pool_size());
+	out["query_cache_entries"] = static_cast<int64_t>(core_->query_cache().cached_query_count());
+	return out;
 }
 
 void VECSWorld::process(double p_delta, const godot::String &p_group) {
@@ -272,6 +490,8 @@ void VECSWorld::compact() {
 }
 
 void VECSWorld::shutdown() {
+	_clear_field_subs();
+	_clear_event_subs();
 	core_->reset();
 	scheduler_->clear();
 }
@@ -367,6 +587,37 @@ godot::Array VECSWorld::_spawn_from_data_impl(const godot::Array &p_entities, go
 			r_mapping[static_cast<int64_t>(i)] = new_id;
 		}
 		out.append(ent);
+	}
+
+	// Auto-parenting: an entry may carry a "parent" key whose value is the source
+	// id or array index of another entity in the same batch. After the whole
+	// batch is spawned (so the mapping is complete), the child's "parent" field
+	// (the field literally named "parent" on one of its components) is rewritten
+	// from the source key to the freshly assigned parent id.
+	for (int i = 0; i < p_entities.size() && i < out.size(); ++i) {
+		if (p_entities[i].get_type() != godot::Variant::DICTIONARY) {
+			continue;
+		}
+		const godot::Dictionary edata = p_entities[i];
+		if (!edata.has("parent")) {
+			continue;
+		}
+		const godot::Variant parent_src = edata["parent"];
+		if (!r_mapping.has(parent_src)) {
+			continue;
+		}
+		godot::Ref<VECSEntity> child = out[i];
+		vortaris::World &w = core();
+		std::vector<vortaris::ComponentTypeId> types;
+		w.get_entity_component_types(child->entity(), types);
+		for (vortaris::ComponentTypeId t : types) {
+			const vortaris::ComponentSchema *s = w.registry().schema_of(t);
+			if (!s || !s->find_field(godot::StringName("parent"))) {
+				continue;
+			}
+			remap_reference(child, godot::String(s->type_name), godot::String("parent"), r_mapping);
+			break;
+		}
 	}
 	return out;
 }
@@ -500,6 +751,9 @@ void VECSWorld::_bind_methods() {
 	using namespace godot;
 	ClassDB::bind_method(D_METHOD("create_entity"), &VECSWorld::create_entity);
 	ClassDB::bind_method(D_METHOD("create_entity_preassigned", "id"), &VECSWorld::create_entity_preassigned);
+	ClassDB::bind_method(D_METHOD("create_entity_pooled"), &VECSWorld::create_entity_pooled);
+	ClassDB::bind_method(D_METHOD("destroy_entity_pooled", "entity"), &VECSWorld::destroy_entity_pooled);
+	ClassDB::bind_method(D_METHOD("pool_size"), &VECSWorld::pool_size);
 	ClassDB::bind_method(D_METHOD("entity", "id"), &VECSWorld::entity);
 	ClassDB::bind_method(D_METHOD("has_entity", "id"), &VECSWorld::has_entity);
 	ClassDB::bind_method(D_METHOD("destroy_entity", "entity"), &VECSWorld::destroy_entity);
@@ -521,6 +775,13 @@ void VECSWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_observer", "observer"), &VECSWorld::add_observer);
 	ClassDB::bind_method(D_METHOD("remove_observer", "observer"), &VECSWorld::remove_observer);
 	ClassDB::bind_method(D_METHOD("emit_event", "name", "entity", "payload"), &VECSWorld::emit_event, DEFVAL(Variant()));
+	ClassDB::bind_method(D_METHOD("on_field_changed", "comp", "field", "callable"), &VECSWorld::on_field_changed);
+	ClassDB::bind_method(D_METHOD("off", "subscription_id"), &VECSWorld::off);
+	ClassDB::bind_method(D_METHOD("subscribe_event", "name", "callable"), &VECSWorld::subscribe_event);
+	ClassDB::bind_method(D_METHOD("unsubscribe_event", "subscription_id"), &VECSWorld::unsubscribe_event);
+	ClassDB::bind_method(D_METHOD("copy_entity_to", "entity", "target"), &VECSWorld::copy_entity_to);
+	ClassDB::bind_method(D_METHOD("merge_world", "source"), &VECSWorld::merge_world);
+	ClassDB::bind_method(D_METHOD("get_debug_stats"), &VECSWorld::get_debug_stats);
 	ClassDB::bind_method(D_METHOD("process", "delta", "group"), &VECSWorld::process, DEFVAL(""));
 	ClassDB::bind_method(D_METHOD("compact"), &VECSWorld::compact);
 	ClassDB::bind_method(D_METHOD("shutdown"), &VECSWorld::shutdown);

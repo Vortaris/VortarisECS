@@ -69,6 +69,14 @@ public:
 	// ---- entity ----
 	Entity create_entity();
 	Entity create_entity_preassigned(uint64_t p_id); // network / deserialization
+	// Pooled entity creation/recycling. destroy_entity_pooled() reclaims the id
+	// WITHOUT bumping its generation, so a stale handle stays valid if the slot
+	// is later reused by create_entity_pooled() (documented trade-off: pooled
+	// handles are not stale-guarded). Slots returned to the pool are never
+	// handed out by create_entity()/create_entity_preassigned().
+	Entity create_entity_pooled();
+	void destroy_entity_pooled(Entity p_e);
+	size_t pool_size() const { return pool_slots_.size(); }
 	void destroy_entity(Entity p_e);
 	void destroy_entity_deferred(Entity p_e);
 	bool is_alive(Entity p_e) const;
@@ -103,7 +111,7 @@ public:
 
 	// ---- observers / events ----
 	ObserverDispatch &observer_dispatch() { return observer_dispatch_; }
-	void emit_event(const godot::String &p_name, Entity p_e, const godot::Variant &p_payload);
+	int emit_event(const godot::String &p_name, Entity p_e, const godot::Variant &p_payload);
 
 	// ---- snapshot serialization (deterministic) ----
 	void serialize_snapshot(BinaryBuffer &r_out) const;
@@ -188,6 +196,7 @@ private:
 
 	std::vector<uint32_t> slot_generations_;
 	std::vector<uint32_t> free_slots_;
+	std::vector<Entity> pool_slots_; // recycled ids reserved for pooled reuse
 	std::unordered_map<Entity, EntityLocation> entity_locations_;
 	// Keyed by the exact sorted component set (no hash), so two distinct sets can
 	// never collide and share columns. Archetype::signature (a hash) is kept only
