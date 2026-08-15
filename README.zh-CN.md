@@ -17,6 +17,13 @@
 - **确定性二进制序列化** —— 小端、定宽、逐字节一致（byte-identical）的快照。
 - **可插拔网络同步** —— `VECSSyncStrategy` 抽象 + 默认的服务器权威快照复制（脏检查增量 + 定期对账 + 反幽灵）。传输层是 Godot 的 MultiplayerAPI（RPC），另附进程内直连测试传输。
 
+## 0.2.1 新特性
+
+- **运行时调试 overlay** —— 编辑器检查器 dock 因进程隔离只能看到编辑器进程的世界（为空），因此新增游戏进程内的 overlay（`addons/vortarisecs/ecs_overlay.gd` + `ecs_overlay.tscn`），实时显示**运行中**世界的统计、实体→组件→字段浏览树，以及 JSON 快照导出/导入。默认关闭，用 `--vortaris-ecs-overlay on` 或游戏内按 **F2** 开关。
+- **headless CLI** —— `--vortaris-ecs-stats`、`--vortaris-ecs-snapshot <path>`、`--vortaris-ecs-overlay on|off`（在世界构建完成后解析，报告真实游戏世界）。输出带 `[vortarisecs]` 前缀，便于 AI/脚本读取。
+- **分级日志** —— 新增 `vortarisecs/verbose` 项目设置；debug 构建的普通运行日志 + verbose 详细追踪（实体生灭、组件写入、observer 派发、网络包细节、query 执行），release 构建完全编译为空。新 API：`VECSWorld.set_verbose(bool)` / `VECSWorld.is_verbose()`。
+- **AI 调试文档** —— 新增 [`docs/AI_DEBUGGING.md`](docs/AI_DEBUGGING.md)：MCP `run_script` 插件 API 示例、CLI 参数表与退出码、编辑器 dock 隔离警告。完整变更日志见 [`RELEASE_NOTES.md`](RELEASE_NOTES.md)。
+
 ## 0.2.0 新特性
 
 - **实体查找** —— `world.entity(id)` / `world.has_entity(id)`；`get_component` 在组件未挂载时返回空句柄。
@@ -80,7 +87,7 @@ godot --headless --path demo --script res://scripts/perf_test.gd
 
 ## 快速上手（GDScript）
 
-一份简短的端到端教程见 [`docs/quickstart.md`](docs/quickstart.md)（可作为 `demo/scripts/quickstart.gd` 运行）。**便捷 API** 用几行代码就能完成简单功能：
+一份简短的端到端教程见 [`docs/quickstart.md`](docs/quickstart.md)（可作为 `demo/scripts/quickstart.gd` 运行）。AI 代理调试运行中的游戏时，请参阅 [`docs/AI_DEBUGGING.md`](docs/AI_DEBUGGING.md)（MCP `run_script` 示例、headless CLI 参数、runtime overlay）。**便捷 API** 用几行代码就能完成简单功能：
 
 ```gdscript
 var world: VECSWorld = VECS.get_world()

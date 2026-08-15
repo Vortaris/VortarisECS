@@ -17,6 +17,26 @@ Design reference: [GECS](https://github.com/BlockBreaker-Studios/GECS) — its a
 - **Deterministic binary serialization** — little-endian, fixed-width, byte-identical snapshots.
 - **Pluggable network sync** — `VECSSyncStrategy` abstraction with a default server-authoritative snapshot replication (dirty-checked deltas + periodic reconciliation + anti-ghost). Transport is Godot's MultiplayerAPI (RPC), with a direct in-process test transport.
 
+## What's new in 0.2.1
+
+- **Runtime debug overlay** — the editor inspector dock can only see the
+  *editor* process's world (empty), so an in-game overlay
+  (`addons/vortarisecs/ecs_overlay.gd` + `ecs_overlay.tscn`) now shows live
+  stats, an entity/component/field browser and JSON snapshot export/import for
+  the **running** world. Off by default; enable with `--vortaris-ecs-overlay on`
+  or toggle with **F2** in-game.
+- **Headless CLI** — `--vortaris-ecs-stats`, `--vortaris-ecs-snapshot <path>`
+  and `--vortaris-ecs-overlay on|off` (parsed after the world is built, so they
+  report the real game world). Output is `[vortarisecs]`-prefixed for AI/scripts.
+- **Tiered logging** — new `vortarisecs/verbose` project setting; debug-only run
+  logs plus verbose traces (entity birth/death, component writes, observer
+  dispatch, network packet detail, query execution), compiled out in release.
+  New API: `VECSWorld.set_verbose(bool)` / `VECSWorld.is_verbose()`.
+- **AI debugging docs** — new [`docs/AI_DEBUGGING.md`](docs/AI_DEBUGGING.md):
+  MCP `run_script` examples, the CLI parameter table, and the editor-dock
+  isolation warning. See [`RELEASE_NOTES.md`](RELEASE_NOTES.md) for the full
+  changelog.
+
 ## What's new in 0.2.0
 
 - **Entity lookup** — `world.entity(id)` / `world.has_entity(id)`; `get_component` now returns a null handle when the component is not attached.
@@ -89,8 +109,10 @@ godot --headless --path demo --script res://scripts/perf_test.gd
 ## Quick start (GDScript)
 
 A short end-to-end walkthrough lives in [`docs/quickstart.md`](docs/quickstart.md)
-(and runs as `demo/scripts/quickstart.gd`). The **convenience API** gets simple
-things done in a few lines:
+(and runs as `demo/scripts/quickstart.gd`). For AI agents debugging a running
+game, see [`docs/AI_DEBUGGING.md`](docs/AI_DEBUGGING.md) (MCP `run_script`
+examples, headless CLI arguments, runtime overlay). The **convenience API** gets
+simple things done in a few lines:
 
 ```gdscript
 var world: VECSWorld = VECS.get_world()
