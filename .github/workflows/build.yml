@@ -87,18 +87,42 @@ jobs:
       - name: Verify binaries exist
         run: ls -la demo/addons/vortarisecs/bin/
 
-      - name: Package addon
+      - name: Upload platform binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: vecs-bin-${{ matrix.pkg }}
+          path: demo/addons/vortarisecs/bin/
+          if-no-files-found: error
+
+  package:
+    name: Package single all-platform addon
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all platform binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/bins
+          merge-multiple: true
+
+      - name: Assemble one addon zip (all platforms)
         shell: bash
         run: |
           set -e
           rm -rf dist/_pkg && mkdir -p dist/_pkg/addons
           cp -r demo/addons/vortarisecs dist/_pkg/addons/
-          rm -f dist/_pkg/addons/vortarisecs/bin/*.exp dist/_pkg/addons/vortarisecs/bin/*.lib
+          # Inject every platform's binaries (replaces bin/.gitkeep).
+          cp -r dist/bins/. dist/_pkg/addons/vortarisecs/bin/
+          rm -f dist/_pkg/addons/vortarisecs/bin/*.exp \
+                dist/_pkg/addons/vortarisecs/bin/*.lib \
+                dist/_pkg/addons/vortarisecs/bin/.gitkeep
           cp LICENSE dist/_pkg/addons/vortarisecs/LICENSE
           python -c "
           import zipfile, os
           src = r'dist/_pkg/addons'
-          dst = f'dist/vortarisecs-${{ github.ref_name }}-${{ matrix.pkg }}.zip'
+          dst = 'dist/vortarisecs-${{ github.ref_name }}.zip'
           with zipfile.ZipFile(dst, 'w', zipfile.ZIP_DEFLATED) as z:
               for root, _, files in os.walk(src):
                   for f in files:
@@ -108,17 +132,17 @@ jobs:
           "
           ls -la dist/
 
-      - name: Upload artifact
+      - name: Upload single addon
         uses: actions/upload-artifact@v4
         with:
-          name: vortarisecs-${{ matrix.pkg }}
-          path: dist/vortarisecs-${{ github.ref_name }}-${{ matrix.pkg }}.zip
+          name: vecs-addon-all
+          path: dist/vortarisecs-${{ github.ref_name }}.zip
           if-no-files-found: error
 
   release:
     name: Attach to GitHub Release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: build
+    needs: package
     runs-on: ubuntu-latest
     permissions:
       contents: write
