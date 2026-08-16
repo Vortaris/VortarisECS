@@ -357,4 +357,24 @@ void component_dict_to_bytes(const ComponentSchema &p_schema, void *p_dst, const
 	}
 }
 
+bool variants_equal(const godot::Variant &p_a, const godot::Variant &p_b) {
+	const godot::Variant::Type ta = p_a.get_type();
+	const godot::Variant::Type tb = p_b.get_type();
+	if (ta == tb) {
+		return p_a == p_b;
+	}
+	// Cross-type numeric coercion (GDScript `==` semantics): INT / FLOAT / BOOL
+	// compare numerically, keeping 64-bit integer precision when neither side is
+	// a float (only then fall through to double).
+	const bool a_num = ta == godot::Variant::INT || ta == godot::Variant::FLOAT || ta == godot::Variant::BOOL;
+	const bool b_num = tb == godot::Variant::INT || tb == godot::Variant::FLOAT || tb == godot::Variant::BOOL;
+	if (a_num && b_num) {
+		if (ta == godot::Variant::FLOAT || tb == godot::Variant::FLOAT) {
+			return static_cast<double>(p_a) == static_cast<double>(p_b);
+		}
+		return static_cast<int64_t>(p_a) == static_cast<int64_t>(p_b);
+	}
+	return p_a == p_b;
+}
+
 } // namespace vortaris

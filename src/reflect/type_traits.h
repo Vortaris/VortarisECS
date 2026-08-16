@@ -32,4 +32,12 @@ void component_bytes_to_variant_dict(const ComponentSchema &p_schema, const void
 // Fields not present in the dictionary keep their (zeroed) value.
 void component_dict_to_bytes(const ComponentSchema &p_schema, void *p_dst, const godot::Dictionary &p_in);
 
+// Compares two Variants for equality the way GDScript's `==` does. godot-cpp's
+// Variant::operator== uses hash_compare, which returns false for numerically
+// equal int/float pairs (2.0 == 2). This coerces numeric types (INT / FLOAT /
+// BOOL), so an F32 field matches an int 0 and an I64 owner field matches an int
+// entity id. Used by VECSQueryBuilder.field_equals and
+// VECSComponent.field_contains.
+bool variants_equal(const godot::Variant &p_a, const godot::Variant &p_b);
+
 } // namespace vortaris

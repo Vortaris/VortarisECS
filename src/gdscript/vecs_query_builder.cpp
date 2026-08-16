@@ -10,6 +10,7 @@
 #include "../core/archetype.h"
 #include "../core/component_registry.h"
 #include "../core/world.h"
+#include "../reflect/type_traits.h"
 #include "vecs_entity.h"
 #include "vecs_log.h"
 
@@ -66,6 +67,51 @@ godot::Ref<VECSQueryBuilder> VECSQueryBuilder::changed(const godot::Array &p_nam
 godot::Ref<VECSQueryBuilder> VECSQueryBuilder::where(const godot::Callable &p_predicate) {
 	where_ = p_predicate;
 	return godot::Ref<VECSQueryBuilder>(this);
+}
+
+godot::Ref<VECSQueryBuilder> VECSQueryBuilder::field_equals(const godot::String &p_comp, const godot::String &p_field, const godot::Variant &p_value) {
+	const vortaris::ComponentTypeId t = world_ ? world_->registry().id_of(godot::StringName(p_comp)) : vortaris::INVALID_COMPONENT_TYPE;
+	if (t == vortaris::INVALID_COMPONENT_TYPE) {
+		ERR_PRINT("VortarisECS: field_equals() unknown component '" + p_comp + "'.");
+		return godot::Ref<VECSQueryBuilder>(this);
+	}
+	FieldEquals fe;
+	fe.comp = t;
+	fe.field = godot::StringName(p_field);
+	fe.value = p_value;
+	field_equals_.push_back(std::move(fe));
+	return godot::Ref<VECSQueryBuilder>(this);
+}
+
+bool VECSQueryBuilder::_matches_field_equals(vortaris::Entity p_e) const {
+	for (const FieldEquals &fe : field_equals_) {
+		if (!world_->has(p_e, fe.comp)) {
+			return false;
+		}
+		const vortaris::ComponentSchema *s = world_->registry().schema_of(fe.comp);
+		if (!s) {
+			return false;
+		}
+		const vortaris::FieldDescriptor *fd = s->find_field(fe.field);
+		if (!fd) {
+			return false;
+		}
+		const void *raw = world_->get_raw(p_e, fe.comp);
+		if (!raw) {
+			return false;
+		}
+		godot::Variant v;
+		if (!vortaris::field_to_variant(*fd, static_cast<const uint8_t *>(raw) + fd->offset, v)) {
+			return false;
+		}
+		// variants_equal coerces numeric types like GDScript `==`, so the caller
+		// can pass a plain int for an I64/U64/I32 owner field or a float value for
+		// an F32 field (an F32 0.0 matches an int 0).
+		if (!vortaris::variants_equal(v, fe.value)) {
+			return false;
+		}
+	}
+	return true;
 }
 
 godot::Ref<VECSQueryBuilder> VECSQueryBuilder::order_by(const godot::String &p_comp, const godot::String &p_field) {
@@ -154,6 +200,9 @@ godot::Array VECSQueryBuilder::execute() {
 				}
 			}
 			const vortaris::Entity e = a->entities[row];
+			if (!field_equals_.empty() && !_matches_field_equals(e)) {
+				continue;
+			}
 			if (where_.is_valid()) {
 				const godot::Variant v = where_.call(VECSEntity::make(world_, e));
 				if (!v.booleanize()) {
@@ -233,6 +282,9 @@ godot::Ref<VECSEntity> VECSQueryBuilder::execute_one() {
 				}
 			}
 			const vortaris::Entity e = a->entities[row];
+			if (!field_equals_.empty() && !_matches_field_equals(e)) {
+				continue;
+			}
 			if (where_.is_valid()) {
 				const godot::Variant v = where_.call(VECSEntity::make(world_, e));
 				if (!v.booleanize()) {
@@ -267,8 +319,11 @@ int64_t VECSQueryBuilder::count() {
 			if (enabled_only_ && !a->get_enabled(row)) {
 				continue;
 			}
+			const vortaris::Entity e = a->entities[row];
+			if (!field_equals_.empty() && !_matches_field_equals(e)) {
+				continue;
+			}
 			if (has_where) {
-				const vortaris::Entity e = a->entities[row];
 				const godot::Variant v = where_.call(VECSEntity::make(world_, e));
 				if (!v.booleanize()) {
 					continue;
@@ -288,6 +343,7 @@ void VECSQueryBuilder::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("enabled"), &VECSQueryBuilder::enabled);
 	ClassDB::bind_method(D_METHOD("changed", "names"), &VECSQueryBuilder::changed, DEFVAL(Array()));
 	ClassDB::bind_method(D_METHOD("where", "predicate"), &VECSQueryBuilder::where);
+	ClassDB::bind_method(D_METHOD("field_equals", "comp", "field", "value"), &VECSQueryBuilder::field_equals);
 	ClassDB::bind_method(D_METHOD("order_by", "comp", "field"), &VECSQueryBuilder::order_by);
 	ClassDB::bind_method(D_METHOD("order_by_id"), &VECSQueryBuilder::order_by_id);
 	ClassDB::bind_method(D_METHOD("execute"), &VECSQueryBuilder::execute);

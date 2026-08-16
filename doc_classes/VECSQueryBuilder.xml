@@ -73,6 +73,35 @@
 				执行查询并返回第一个匹配实体（无匹配则返回空句柄）。遵守与 [method execute] 相同的过滤器，包括 [method changed]。
 			</description>
 		</method>
+		<method name="field_equals">
+			<return type="VECSQueryBuilder" />
+			<param index="0" name="comp" type="String" />
+			<param index="1" name="field" type="String" />
+			<param index="2" name="value" type="Variant" />
+			<description>
+				Restricts the query to entities that carry component [param comp] AND whose field [param field] value equals [param value]. The comparison runs entirely in C++ (no per-entity GDScript callback), so the "query the whole table then hand-compare the owner field" scan collapses to one filtered query:
+
+				[codeblock]
+				var owned := world.query() \
+				    .with_all(["Combatant"]) \
+				    .field_equals("Combatant", "owner", eid) \
+				    .execute()
+				[/codeblock]
+
+				Chainable: each call adds one equality constraint; all must hold (AND). Applied by [method execute], [method execute_one] and [method count], alongside the other filters. Equality follows GDScript [code]==[/code] semantics, so an I64 field matches an int and an F32 field matches a float (an F32 [code]0.0[/code] matches an int [code]0[/code]). An unknown component is ignored with an error printed (the term does not filter).
+
+				把查询限制为：实体携带组件 [param comp] 且其字段 [param field] 的值等于 [param value]。比较完全在 C++ 侧进行（无逐实体 GDScript 回调），因此"全表查询再手比 owner 字段"的扫描可收缩为一条过滤查询：
+
+				[codeblock]
+				var owned := world.query() \
+				    .with_all(["Combatant"]) \
+				    .field_equals("Combatant", "owner", eid) \
+				    .execute()
+				[/codeblock]
+
+				可链式调用：每次调用新增一条相等约束，须全部满足（AND）。[method execute]、[method execute_one] 与 [method count] 都会应用，并与其他过滤器组合。相等比较遵循 GDScript [code]==[/code] 语义，因此 I64 字段匹配 int，F32 字段匹配 float（F32 [code]0.0[/code] 匹配 int [code]0[/code]）。未知组件会被忽略并打印错误（该条件不生效）。
+			</description>
+		</method>
 		<method name="get_last_execution_time_usec" qualifiers="const">
 			<return type="int" />
 			<description>
