@@ -35,12 +35,27 @@ extends Control
 ##   W4  The Entities search box has a mode dropdown: Mixed (id+component+value
 ##       substring), By value (field values, supports "comp/field == value"),
 ##       By component (names only) and Fuzzy (loose subsequence matching).
+##   V2  No minimum-size restriction: the tab lays out at whatever size the
+##       editor's debugger bottom panel is dragged to (the root Control's min
+##       size is 0). The column minimum widths are just a sensible default.
+##   V3  All four trees use VECSResizableTree so every column separator is
+##       user-draggable (Godot's Tree has no built-in header drag-resize).
+##   V4  The component-picker Filter dialog keeps the checkbox list inside a
+##       ScrollContainer with a reasonable ~380px default height, so a project
+##       with hundreds of registered components scrolls instead of stretching
+##       the dialog off-screen.
 
 var plugin: EditorDebuggerPlugin = null
 var session_id: int = -1
 
+const ResizableTree := preload("res://addons/vortarisecs/editor/ecs_resizable_tree.gd")
+
 const DEFAULT_AUTO_REFRESH_INTERVAL := 1.0
 const DEFAULT_MAX_ENTITIES := 500
+
+## Default content size of the W3 component-picker dialog (V4). Tall enough to
+## show a handful of checkboxes plus the mode row; the list scrolls past it.
+const COMP_FILTER_DIALOG_MIN_SIZE := Vector2i(360, 380)
 
 const ENTITY_COLS := ["Entity ID", "Component", "Field", "Value"]
 const ENTITY_WIDTHS := [220, 120, 140, 200]
@@ -113,6 +128,7 @@ var _comp_filter_dialog: AcceptDialog
 var _comp_filter_box: VBoxContainer
 var _comp_filter_option: OptionButton
 var _comp_filter_checks := {}
+var _comp_filter_list: VBoxContainer
 
 # Per-page preserved expansion state (U1). Only updated from a NON-filtered
 # render, so clearing a filter returns to exactly what the user had expanded
@@ -295,7 +311,7 @@ func _make_search(page_name: String, placeholder: String) -> LineEdit:
 
 
 func _make_tree(column_titles: Array, widths: Array) -> Tree:
-	var tree := Tree.new()
+	var tree: Tree = ResizableTree.new()
 	tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	tree.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	tree.column_titles_visible = true
@@ -303,8 +319,13 @@ func _make_tree(column_titles: Array, widths: Array) -> Tree:
 	tree.columns = column_titles.size()
 	for i in column_titles.size():
 		tree.set_column_title(i, column_titles[i])
-		tree.set_column_expand(i, i == 0)
+		# Only the LAST column expands (V3); the earlier columns are non-expanding
+		# so a VECSResizableTree drag pins their width exactly. A fully-expanding
+		# first column would snap the drag back to fill the leftover space.
+		tree.set_column_expand(i, i == column_titles.size() - 1)
 		tree.set_column_custom_minimum_width(i, widths[i] if i < widths.size() else 80)
+		# Never clip a dragged column's text (matches VECSResizableTree).
+		tree.set_column_clip_content(i, false)
 	return tree
 
 
@@ -1193,31 +1214,48 @@ func _open_comp_filter_dialog() -> void:
 		_comp_filter_box = VBoxContainer.new()
 		_comp_filter_box.name = "ComponentFilterBox"
 		_comp_filter_box.add_theme_constant_override("separation", 4)
+		# V4: cap the dialog's default height so a project with many components
+		# scrolls instead of stretching the window off-screen. The ScrollContainer
+		# below clips its (possibly very tall) list, so this stays the content min.
+		_comp_filter_box.custom_minimum_size = COMP_FILTER_DIALOG_MIN_SIZE
 		_comp_filter_dialog.add_child(_comp_filter_box)
+		# All/Any mode selector — built once, selection refreshed per open.
+		var header := HBoxContainer.new()
+		header.name = "ModeRow"
+		var mode_label := Label.new()
+		mode_label.text = "Match:"
+		header.add_child(mode_label)
+		_comp_filter_option = OptionButton.new()
+		_comp_filter_option.name = "ModeOption"
+		_comp_filter_option.add_item("All selected components", 0)
+		_comp_filter_option.add_item("Any selected component", 1)
+		header.add_child(_comp_filter_option)
+		_comp_filter_box.add_child(header)
+		_comp_filter_box.add_child(HSeparator.new())
+		# V4: the checkbox list lives in a ScrollContainer. Its minimum size does
+		# NOT grow with the (tall) list, so the dialog keeps the size above.
+		var scroll := ScrollContainer.new()
+		scroll.name = "ComponentFilterScroll"
+		scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		_comp_filter_box.add_child(scroll)
+		_comp_filter_list = VBoxContainer.new()
+		_comp_filter_list.name = "ComponentFilterList"
+		_comp_filter_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_comp_filter_list.add_theme_constant_override("separation", 2)
+		scroll.add_child(_comp_filter_list)
 		add_child(_comp_filter_dialog)
 	_populate_comp_filter_dialog()
-	_comp_filter_dialog.popup_centered()
+	_comp_filter_dialog.popup_centered(COMP_FILTER_DIALOG_MIN_SIZE)
 
 
 func _populate_comp_filter_dialog() -> void:
-	for child in _comp_filter_box.get_children():
-		_comp_filter_box.remove_child(child)
+	for child in _comp_filter_list.get_children():
+		_comp_filter_list.remove_child(child)
 		child.queue_free()
 	_comp_filter_checks = {}
-	# All/Any mode selector.
-	var header := HBoxContainer.new()
-	header.name = "ModeRow"
-	var mode_label := Label.new()
-	mode_label.text = "Match:"
-	header.add_child(mode_label)
-	_comp_filter_option = OptionButton.new()
-	_comp_filter_option.name = "ModeOption"
-	_comp_filter_option.add_item("All selected components", 0)
-	_comp_filter_option.add_item("Any selected component", 1)
+	# Reflect the current All/Any mode every time the dialog opens.
 	_comp_filter_option.select(1 if _entities_comp_filter_any else 0)
-	header.add_child(_comp_filter_option)
-	_comp_filter_box.add_child(header)
-	_comp_filter_box.add_child(HSeparator.new())
 	# One checkbox per registered component (from the snapshot's components data).
 	var comps: Variant = _last_components
 	var added := false
@@ -1231,13 +1269,13 @@ func _populate_comp_filter_dialog() -> void:
 			var cb := CheckBox.new()
 			cb.text = cname
 			cb.button_pressed = _entities_comp_filter.has(cname)
-			_comp_filter_box.add_child(cb)
+			_comp_filter_list.add_child(cb)
 			_comp_filter_checks[cname] = cb
 			added = true
 	if not added:
 		var none := Label.new()
 		none.text = "No components registered yet."
-		_comp_filter_box.add_child(none)
+		_comp_filter_list.add_child(none)
 
 
 func _on_comp_filter_confirmed() -> void:
