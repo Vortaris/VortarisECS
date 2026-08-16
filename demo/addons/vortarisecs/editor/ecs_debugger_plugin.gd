@@ -16,6 +16,8 @@ extends EditorDebuggerPlugin
 
 const MSG_REQ := "vecs:req_snapshot"
 const MSG_SNAPSHOT := "vecs:snapshot"
+const MSG_SET_FIELD := "vecs:set_field"
+const MSG_SET_FIELD_RESULT := "vecs:set_field_result"
 const PREFIX := "vecs"
 
 const TabScene := preload("res://addons/vortarisecs/editor/ecs_debugger_tab.gd")
@@ -63,16 +65,26 @@ func _on_session_stopped(session_id: int) -> void:
 
 
 func _capture(message: String, data: Array, session_id: int) -> bool:
-	if message != MSG_SNAPSHOT:
-		return false
 	var tab = _tabs.get(session_id)
-	if not is_instance_valid(tab):
+	if message == MSG_SNAPSHOT:
+		if not is_instance_valid(tab):
+			return true
+		var snapshot: Dictionary = {}
+		if data.size() > 0 and data[0] is Dictionary:
+			snapshot = data[0]
+		tab.set_snapshot(snapshot)
 		return true
-	var snapshot: Dictionary = {}
-	if data.size() > 0 and data[0] is Dictionary:
-		snapshot = data[0]
-	tab.set_snapshot(snapshot)
-	return true
+	if message == MSG_SET_FIELD_RESULT:
+		if not is_instance_valid(tab):
+			return true
+		# data = [ok, entity_id, comp, field, error]
+		tab.set_field_result(bool(data[0]) if data.size() > 0 else false,
+				int(data[1]) if data.size() > 1 else 0,
+				str(data[2]) if data.size() > 2 else "",
+				str(data[3]) if data.size() > 3 else "",
+				str(data[4]) if data.size() > 4 else "")
+		return true
+	return false
 
 
 ## Asks the running game for a fresh snapshot over the debugger channel.
@@ -83,3 +95,15 @@ func request_snapshot(session_id: int) -> void:
 	if not session.is_active():
 		return
 	session.send_message(MSG_REQ, [])
+
+
+## Asks the running game to write a component field value over the debugger
+## channel. Only valid while the session is active; the game replies on
+## MSG_SET_FIELD_RESULT with the ok/error.
+func send_set_field(session_id: int, entity_id: int, comp: String, field: String, value: Variant) -> void:
+	var session := get_session(session_id)
+	if session == null:
+		return
+	if not session.is_active():
+		return
+	session.send_message(MSG_SET_FIELD, [entity_id, comp, field, value])

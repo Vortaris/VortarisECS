@@ -35,6 +35,10 @@ var _connected := false
 
 
 func _ready() -> void:
+	# The session tab is inserted straight into the editor debugger's
+	# TabContainer with no scene file, so the root Control must be named
+	# explicitly or it shows up as "@control<id>".
+	name = "ECS"
 	# Read the tunable settings fresh each time the tab is (re)built so a change
 	# in Project Settings takes effect on the next editor session.
 	_auto_refresh_interval = float(ProjectSettings.get_setting(
@@ -43,11 +47,19 @@ func _ready() -> void:
 			"vortarisecs/general/max_snapshot_entities", DEFAULT_MAX_ENTITIES))
 	_build_ui()
 	_auto_timer = Timer.new()
+	_auto_timer.name = "AutoRefreshTimer"
 	_auto_timer.wait_time = _auto_refresh_interval
 	_auto_timer.timeout.connect(_on_auto_timeout)
 	add_child(_auto_timer)
+	# A freshly created Timer is NOT running: start() is what arms the
+	# auto-refresh loop (without it only the manual Refresh button worked).
+	# set_connected() then pauses/resumes it so it only fires while a game lives.
+	_auto_timer.start()
 	_refresh_button.pressed.connect(_request_snapshot)
 	_auto_check.toggled.connect(_on_auto_toggled)
+	# Live value editing: the Entities page's Value cells are editable and each
+	# edit is sent to the RUNNING game over the debugger channel (E8).
+	_entities_tree.item_edited.connect(_on_entity_field_edited)
 	_show_waiting()
 	set_connected(false)
 
@@ -88,6 +100,7 @@ func set_snapshot(snapshot: Dictionary) -> void:
 
 func _build_ui() -> void:
 	var root := VBoxContainer.new()
+	root.name = "Root"
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -95,40 +108,62 @@ func _build_ui() -> void:
 	add_child(root)
 
 	var toolbar := HBoxContainer.new()
+	toolbar.name = "Toolbar"
 	root.add_child(toolbar)
 
 	_status_label = Label.new()
+	_status_label.name = "StatusLabel"
 	toolbar.add_child(_status_label)
 
+	# Vertical rule between the status readout and the action controls.
+	var toolbar_sep := VSeparator.new()
+	toolbar_sep.name = "ToolbarSeparator"
+	toolbar.add_child(toolbar_sep)
+
 	var spacer := Control.new()
+	spacer.name = "Spacer"
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	toolbar.add_child(spacer)
 
 	_auto_check = CheckBox.new()
-	_auto_check.text = "Auto refresh (%gs)" % _auto_refresh_interval
+	_auto_check.name = "AutoRefreshCheck"
+	# NOTE: Godot's String % supports %s/%d/%f/%v (and a few more), but NOT %g;
+	# using %g throws "String formatting error: unsupported format character".
+	_auto_check.text = "Auto refresh (%.1fs)" % _auto_refresh_interval
 	_auto_check.button_pressed = true
-	_auto_check.tooltip_text = "Request a fresh snapshot every %g seconds." % _auto_refresh_interval
+	_auto_check.tooltip_text = "Request a fresh snapshot every %.1f seconds." % _auto_refresh_interval
 	toolbar.add_child(_auto_check)
 
 	_refresh_button = Button.new()
+	_refresh_button.name = "RefreshButton"
 	_refresh_button.text = "Refresh"
 	_refresh_button.tooltip_text = "Request one fresh snapshot from the running game."
 	toolbar.add_child(_refresh_button)
 
+	# Horizontal rule separating the toolbar from the data tables below.
+	var toolbar_tabs_sep := HSeparator.new()
+	toolbar_tabs_sep.name = "ToolbarTabsSeparator"
+	root.add_child(toolbar_tabs_sep)
+
 	_tabs = TabContainer.new()
+	_tabs.name = "Tabs"
 	_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(_tabs)
 
 	_entities_tree = _make_tree(["Entity ID", "Component", "Field", "Value"], [220, 120, 140, 200])
+	_entities_tree.name = "EntitiesTree"
 	_tabs.add_child(_make_page("Entities", _entities_tree))
 
 	_components_tree = _make_tree(["Component", "Field", "Type", "Count", "Sync", "Net"], [180, 120, 90, 60, 50, 50])
+	_components_tree.name = "ComponentsTree"
 	_tabs.add_child(_make_page("Components", _components_tree))
 
 	_systems_tree = _make_tree(["Name", "Group", "Active", "Paused", "Interval", "Flush"], [160, 110, 60, 60, 80, 60])
+	_systems_tree.name = "SystemsTree"
 	_tabs.add_child(_make_page("Systems", _systems_tree))
 
 	_stats_tree = _make_tree(["Stat", "Value"], [220, 160])
+	_stats_tree.name = "StatsTree"
 	_tabs.add_child(_make_page("Stats", _stats_tree))
 
 
@@ -147,13 +182,23 @@ func _make_tree(column_titles: Array, widths: Array) -> Tree:
 
 
 func _make_page(title: String, tree: Tree) -> Control:
-	var page := MarginContainer.new()
+	var page := VBoxContainer.new()
 	page.name = title
-	page.add_theme_constant_override("margin_left", 4)
-	page.add_theme_constant_override("margin_right", 4)
-	page.add_theme_constant_override("margin_top", 4)
-	page.add_theme_constant_override("margin_bottom", 4)
-	page.add_child(tree)
+	page.add_theme_constant_override("separation", 4)
+	# Horizontal rule under the tab bar so each page reads as
+	# separator / table (matches the toolbar separator above the tabs).
+	var sep := HSeparator.new()
+	sep.name = "PageSeparator"
+	page.add_child(sep)
+	var margin := MarginContainer.new()
+	margin.name = "TreeMargin"
+	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin.add_theme_constant_override("margin_left", 4)
+	margin.add_theme_constant_override("margin_right", 4)
+	margin.add_theme_constant_override("margin_top", 4)
+	margin.add_theme_constant_override("margin_bottom", 4)
+	margin.add_child(tree)
+	page.add_child(margin)
 	return page
 
 
@@ -243,7 +288,23 @@ func _populate_entities(entities: Variant) -> void:
 				for fname in fields:
 					var fitem := _entities_tree.create_item(citem)
 					fitem.set_text(2, str(fname))
-					fitem.set_text(3, str((fields as Dictionary)[fname]))
+					var raw_value: Variant = (fields as Dictionary)[fname]
+					fitem.set_text(3, str(raw_value))
+					# Runtime-debug editing (E8): the Value cell is editable and
+					# carries the original Variant + addressing metadata, so the
+					# edited text can be coerced back to the field's real type
+					# before it is sent to the running game.
+					fitem.set_editable(3, true)
+					fitem.set_metadata(0, {
+						"eid": int(edata.get("id", 0)),
+						"comp": str(cname),
+						"field": str(fname),
+						"value": raw_value,
+					})
+					# Field VALUES default collapsed: the page then reads as
+					# entity -> component -> (folded fields), which stays
+					# navigable even with hundreds of entities.
+					fitem.collapsed = true
 
 
 func _placeholder_item(root: TreeItem, text: String) -> void:
@@ -262,6 +323,121 @@ func _show_waiting() -> void:
 	_placeholder_item(_stats_tree.create_item(), "—")
 
 
+# ---------------------------------------------------------------- live editing ----
+
+func _on_entity_field_edited() -> void:
+	var item := _entities_tree.get_edited()
+	var col := _entities_tree.get_edited_column()
+	if item == null or col != 3:
+		return
+	var meta: Dictionary = item.get_metadata(0)
+	if not meta.has("eid"):
+		return
+	var eid: int = int(meta.get("eid", 0))
+	var comp: String = str(meta.get("comp", ""))
+	var field: String = str(meta.get("field", ""))
+	var original: Variant = meta.get("value")
+	var value := _coerce_field_value(original, item.get_text(col))
+	if value == original:
+		return  # unparsable / unchanged — keep the last known good text
+	_send_set_field(eid, comp, field, value)
+
+
+func _send_set_field(entity_id: int, comp: String, field: String, value: Variant) -> void:
+	if not _connected or plugin == null:
+		return
+	plugin.send_set_field(session_id, entity_id, comp, field, value)
+	_status_label.text = "Set %s.%s on #%d — sent…" % [comp, field, entity_id]
+	_status_label.add_theme_color_override("font_color", Color(0.9, 0.85, 0.5))
+
+
+func set_field_result(ok: bool, entity_id: int, comp: String, field: String, error: String) -> void:
+	if ok:
+		_status_label.text = "Set %s.%s on #%d — applied" % [comp, field, entity_id]
+		_status_label.add_theme_color_override("font_color", Color(0.45, 0.9, 0.45))
+		_request_snapshot()
+	else:
+		_status_label.text = "Set %s.%s on #%d failed: %s" % [comp, field, entity_id, error]
+		_status_label.add_theme_color_override("font_color", Color(0.9, 0.5, 0.4))
+
+
+## Parses the text a user typed into a Value cell back into the Variant type of
+## the original value. Returns the original value when the text cannot be parsed,
+## so a bad edit degrades to "no change" instead of corrupting the field.
+func _coerce_field_value(original: Variant, text: String) -> Variant:
+	match typeof(original):
+		TYPE_FLOAT:
+			return float(text) if text.is_valid_float() else original
+		TYPE_INT:
+			return int(text) if text.is_valid_int() else original
+		TYPE_BOOL:
+			var s := text.strip_edges().to_lower()
+			return s == "true" or s == "1" or s == "yes" or s == "on"
+		TYPE_STRING:
+			return text
+		TYPE_VECTOR2:
+			var p := _split_numbers(text, 2)
+			return Vector2(p[0], p[1]) if p.size() == 2 else original
+		TYPE_VECTOR2I:
+			var p := _split_ints(text, 2)
+			return Vector2i(p[0], p[1]) if p.size() == 2 else original
+		TYPE_VECTOR3:
+			var p := _split_numbers(text, 3)
+			return Vector3(p[0], p[1], p[2]) if p.size() == 3 else original
+		TYPE_VECTOR3I:
+			var p := _split_ints(text, 3)
+			return Vector3i(p[0], p[1], p[2]) if p.size() == 3 else original
+		TYPE_VECTOR4:
+			var p := _split_numbers(text, 4)
+			return Vector4(p[0], p[1], p[2], p[3]) if p.size() == 4 else original
+		TYPE_VECTOR4I:
+			var p := _split_ints(text, 4)
+			return Vector4i(p[0], p[1], p[2], p[3]) if p.size() == 4 else original
+		TYPE_COLOR:
+			var p := _split_numbers(text, 4, true)
+			if p.size() == 3:
+				return Color(p[0], p[1], p[2])
+			if p.size() == 4:
+				return Color(p[0], p[1], p[2], p[3])
+			return original
+		TYPE_QUATERNION:
+			var p := _split_numbers(text, 4)
+			return Quaternion(p[0], p[1], p[2], p[3]) if p.size() == 4 else original
+		_:
+			# Best-effort for the remaining Godot types (Basis, Transform2D/3D,
+			# Rect2, AABB, Plane...): accept Godot's variant-literal syntax,
+			# e.g. "Vector3(1, 2, 3)" or "Transform3D(...)".
+			var v := str_to_var(text)
+			return v if v != null else original
+	return original
+
+
+func _split_numbers(text: String, count: int, allow_short: bool = false) -> PackedFloat64Array:
+	var clean := text.replace("(", "").replace(")", "").replace("[", "").replace("]", "")
+	var out := PackedFloat64Array()
+	for part in clean.split(",", false):
+		var s := part.strip_edges()
+		if not s.is_valid_float():
+			return PackedFloat64Array()
+		out.append(float(s))
+	if out.size() == count or (allow_short and out.size() == count - 1):
+		return out
+	return PackedFloat64Array()
+
+
+func _split_ints(text: String, count: int) -> PackedInt64Array:
+	var clean := text.replace("(", "").replace(")", "").replace("[", "").replace("]", "")
+	var out := PackedInt64Array()
+	for part in clean.split(",", false):
+		var s := part.strip_edges()
+		if not s.is_valid_int():
+			return PackedInt64Array()
+		out.append(int(s))
+	if out.size() == count:
+		return out
+	return PackedInt64Array()
+
+
 # ---------------------------------------------------------------- requests ----
 
 func _request_snapshot() -> void:
@@ -275,5 +451,13 @@ func _on_auto_timeout() -> void:
 		_request_snapshot()
 
 
-func _on_auto_toggled(_pressed: bool) -> void:
+func _on_auto_toggled(pressed: bool) -> void:
+	# Reflect the checkbox immediately: stop the timer when auto-refresh is off
+	# (a stopped timer stays stopped across a reconnect, matching the checkbox),
+	# restart it when on. paused (set by set_connected) still gates the countdown.
+	if _auto_timer:
+		if pressed:
+			_auto_timer.start()
+		else:
+			_auto_timer.stop()
 	_request_snapshot()
