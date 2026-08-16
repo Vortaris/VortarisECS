@@ -8,14 +8,19 @@ extends Control
 ##   Systems     — registered systems (name, group, active/paused)
 ##   Stats       — get_debug_stats() numbers
 ##
-## Data is fetched on demand (Refresh button) and optionally at ~1 Hz
-## (Auto refresh). When no game is connected the tab shows a waiting hint.
+## Data is fetched on demand (Refresh button) and optionally at the interval
+## from `vortarisecs/debug/auto_refresh_interval` (default ~1 Hz, Auto refresh).
+## When no game is connected the tab shows a waiting hint. The Entities page
+## caps the rendered rows at `vortarisecs/general/max_snapshot_entities`.
 
 var plugin: EditorDebuggerPlugin = null
 var session_id: int = -1
 
-const AUTO_REFRESH_INTERVAL := 1.0
-const MAX_ENTITIES := 500
+const DEFAULT_AUTO_REFRESH_INTERVAL := 1.0
+const DEFAULT_MAX_ENTITIES := 500
+
+var _auto_refresh_interval: float = DEFAULT_AUTO_REFRESH_INTERVAL
+var _max_entities: int = DEFAULT_MAX_ENTITIES
 
 var _status_label: Label
 var _auto_check: CheckBox
@@ -30,9 +35,15 @@ var _connected := false
 
 
 func _ready() -> void:
+	# Read the tunable settings fresh each time the tab is (re)built so a change
+	# in Project Settings takes effect on the next editor session.
+	_auto_refresh_interval = float(ProjectSettings.get_setting(
+			"vortarisecs/debug/auto_refresh_interval", DEFAULT_AUTO_REFRESH_INTERVAL))
+	_max_entities = int(ProjectSettings.get_setting(
+			"vortarisecs/general/max_snapshot_entities", DEFAULT_MAX_ENTITIES))
 	_build_ui()
 	_auto_timer = Timer.new()
-	_auto_timer.wait_time = AUTO_REFRESH_INTERVAL
+	_auto_timer.wait_time = _auto_refresh_interval
 	_auto_timer.timeout.connect(_on_auto_timeout)
 	add_child(_auto_timer)
 	_refresh_button.pressed.connect(_request_snapshot)
@@ -94,9 +105,9 @@ func _build_ui() -> void:
 	toolbar.add_child(spacer)
 
 	_auto_check = CheckBox.new()
-	_auto_check.text = "Auto refresh (1s)"
+	_auto_check.text = "Auto refresh (%gs)" % _auto_refresh_interval
 	_auto_check.button_pressed = true
-	_auto_check.tooltip_text = "Request a fresh snapshot about once per second."
+	_auto_check.tooltip_text = "Request a fresh snapshot every %g seconds." % _auto_refresh_interval
 	toolbar.add_child(_auto_check)
 
 	_refresh_button = Button.new()
@@ -212,9 +223,9 @@ func _populate_entities(entities: Variant) -> void:
 	var count := 0
 	var total: int = (entities as Array).size()
 	for edata in entities:
-		if count >= MAX_ENTITIES:
+		if count >= _max_entities:
 			var note := _entities_tree.create_item(root)
-			note.set_text(0, "… %d more entities not shown (limit %d)" % [total - count, MAX_ENTITIES])
+			note.set_text(0, "… %d more entities not shown (limit %d)" % [total - count, _max_entities])
 			break
 		if not (edata is Dictionary):
 			continue

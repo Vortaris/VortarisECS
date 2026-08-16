@@ -11,15 +11,17 @@
 //   log_verbose — detailed trace (entity birth/death, component writes,
 //                 observer dispatch, network packet detail, query execution).
 //                 Only printed in DEBUG_ENABLED builds AND when the
-//                 `vortarisecs/verbose` project setting is true.
+//                 `vortarisecs/general/verbose` project setting is true
+//                 (with fallback to the legacy `vortarisecs/verbose` path).
 //
 // Errors/warnings always go through push_error / push_warning and are NOT
 // gated by these helpers.
 namespace vortaris {
 
 // True when detailed verbose logging is active: DEBUG_ENABLED build AND the
-// `vortarisecs/verbose` project setting. The flag is cached so the hot-path
-// check is a single bool load; use it to short-circuit message formatting:
+// `vortarisecs/general/verbose` project setting. The flag is cached so the
+// hot-path check is a single bool load; use it to short-circuit message
+// formatting:
 //
 //   if (vortaris::verbose_active()) {
 //       vortaris::log_verbose("...");
@@ -38,13 +40,14 @@ inline bool verbose_active() {
 #endif
 }
 
-// Sets the cached verbose flag AND the `vortarisecs/verbose` project setting
-// so the runtime toggle and the persisted setting stay in sync. No-op in
-// release builds (verbose logging is compiled out there).
+// Sets the cached verbose flag AND the `vortarisecs/general/verbose` project
+// setting so the runtime toggle and the persisted setting stay in sync. No-op
+// in release builds (verbose logging is compiled out there).
 void set_verbose(bool p_on);
 
-// Re-reads the `vortarisecs/verbose` project setting into the cache. Called at
-// module init so a value baked into project.godot seeds the flag.
+// Re-reads the `vortarisecs/general/verbose` project setting into the cache
+// (falling back to the legacy `vortarisecs/verbose` path). Called at module
+// init so a value baked into project.godot seeds the flag.
 void refresh_verbose();
 
 // Normal run log: printed in DEBUG_ENABLED builds, compiled out in release.

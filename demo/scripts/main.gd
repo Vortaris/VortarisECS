@@ -368,8 +368,8 @@ func _resolve_cli_path(path: String) -> String:
 
 func _save_cli_snapshot(path: String) -> bool:
 	var world: VECSWorld = VECS.get_world()
-	var save: Dictionary = world.serialize_snapshot_json()
-	var text: String = JSON.stringify(save, "\t")
+	# Honors vortarisecs/serialization/compact_json (compact vs pretty JSON).
+	var text: String = world.serialize_snapshot_json_string()
 	var resolved := _resolve_cli_path(path)
 	if not _ensure_snapshot_parent_dir(resolved):
 		printerr("[vortarisecs] snapshot write failed (cannot create parent dir): ", resolved)

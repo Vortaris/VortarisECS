@@ -51,6 +51,8 @@ public:
 	// --- GDScript override point ---
 	GDVIRTUAL3(_script_each, int64_t, VECSEntity *, godot::Variant);
 
+	VECSObserver();
+
 	// --- config ---
 	void set_events(int p_mask);
 	int get_events() const { return event_mask_; }

@@ -16,6 +16,7 @@
 #include "../serialization/snapshot.h"
 #include "vecs_command_buffer.h"
 #include "vecs_log.h"
+#include "vecs_settings.h"
 #include "vecs_component_type.h"
 #include "vecs_entity.h"
 #include "vecs_observer.h"
@@ -146,7 +147,14 @@ bool VECSWorld::register_component(const godot::String &p_name, const godot::Arr
 		fd.type = t;
 		int64_t count = d.get("count", (int64_t)1);
 		fd.count = count > 0 ? static_cast<size_t>(count) : 1;
-		fd.sync_priority = static_cast<uint8_t>((int64_t)d.get("sync_priority", (int64_t)vortaris::SYNC_MEDIUM));
+		// Unspecified sync_priority falls back to the
+		// `vortarisecs/network/default_sync_priority` project setting (clamped
+		// to the valid SyncPriority range by the accessor).
+		if (d.has("sync_priority")) {
+			fd.sync_priority = static_cast<uint8_t>((int64_t)d["sync_priority"]);
+		} else {
+			fd.sync_priority = vortaris::get_default_sync_priority();
+		}
 		fd.is_networked = (bool)d.get("networked", true);
 		fds.push_back(fd);
 	}
@@ -601,7 +609,15 @@ void VECSWorld::set_verbose(bool p_on) {
 }
 
 bool VECSWorld::is_verbose() const {
-	return vortaris::verbose_active();
+#ifdef DEBUG_ENABLED
+	// Re-read the persisted setting (canonical path, legacy fallback) so the
+	// reported state always reflects the project setting — including an
+	// upgraded project that still only has `vortarisecs/verbose`. Release
+	// builds compile verbose logging out entirely.
+	return vortaris::get_verbose_setting();
+#else
+	return false;
+#endif
 }
 
 void VECSWorld::process(double p_delta, const godot::String &p_group) {
@@ -790,6 +806,13 @@ godot::Dictionary VECSWorld::serialize_snapshot_json() {
 	return out;
 }
 
+godot::String VECSWorld::serialize_snapshot_json_string() {
+	// Honors `vortarisecs/serialization/compact_json`: true => unindented
+	// (compact) JSON, false => pretty-printed with tab indentation.
+	const bool compact = vortaris::get_compact_json();
+	return godot::JSON::stringify(serialize_snapshot_json(), compact ? "" : "\t");
+}
+
 namespace {
 bool parse_snapshot_root(const godot::Variant &p_data, godot::Dictionary &r_root) {
 	if (p_data.get_type() == godot::Variant::STRING) {
@@ -829,7 +852,7 @@ bool VECSWorld::deserialize_snapshot_json(const godot::Variant &p_data) {
 	const godot::Array ents = root["entities"];
 	// Loading a save replaces the world, but a partial/failed load must not
 	// destroy the live world: back it up first so it can be restored.
-	const godot::String backup = godot::JSON::stringify(serialize_snapshot_json());
+	const godot::String backup = serialize_snapshot_json_string();
 	// Loading a save replaces the world: drop any existing entities first.
 	core_->clear();
 	const godot::Array spawned = spawn_from_data(ents);
@@ -863,7 +886,7 @@ godot::Dictionary VECSWorld::deserialize_snapshot_json_mapped(const godot::Varia
 	// Same backup-before-replace contract as deserialize_snapshot_json: a
 	// partial/failed load restores the previous world instead of leaving it
 	// cleared and half-rebuilt.
-	const godot::String backup = godot::JSON::stringify(serialize_snapshot_json());
+	const godot::String backup = serialize_snapshot_json_string();
 	core_->clear();
 	godot::Dictionary mapping = spawn_from_data_mapped(ents);
 	if (mapping.size() != ents.size()) {
@@ -941,6 +964,7 @@ void VECSWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("spawn_from_data_mapped", "entities"), &VECSWorld::spawn_from_data_mapped);
 	ClassDB::bind_method(D_METHOD("entities_to_data"), &VECSWorld::entities_to_data);
 	ClassDB::bind_method(D_METHOD("serialize_snapshot_json"), &VECSWorld::serialize_snapshot_json);
+	ClassDB::bind_method(D_METHOD("serialize_snapshot_json_string"), &VECSWorld::serialize_snapshot_json_string);
 	ClassDB::bind_method(D_METHOD("deserialize_snapshot_json", "data"), &VECSWorld::deserialize_snapshot_json);
 	ClassDB::bind_method(D_METHOD("deserialize_snapshot_json_mapped", "data"), &VECSWorld::deserialize_snapshot_json_mapped);
 	ClassDB::bind_method(D_METHOD("remap_reference", "entity", "comp", "field", "map"), &VECSWorld::remap_reference);

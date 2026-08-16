@@ -1,5 +1,38 @@
 # VortarisECS Release Notes
 
+## 0.4.0 (2026-08-16)
+
+**Project Settings reorganization + new tunables.** Settings moved from a flat
+`vortarisecs/verbose` to a hierarchical `vortarisecs/<category>/<name>` layout
+so they group nicely under Project Settings > VortarisECS, and several previously
+hard-coded defaults became project settings.
+
+### Project settings (hierarchical)
+
+| Setting | Type / default | Effect |
+|---|---|---|
+| `vortarisecs/general/verbose` | bool, false | Detailed verbose logging (debug builds only). **Migrated from `vortarisecs/verbose`** (0.3.0) — the legacy flat path is still honored as a fallback. |
+| `vortarisecs/general/auto_shutdown_on_exit` | bool, true | Whether extension teardown calls `VECSWorld::shutdown()` to clear transient state before the engine singleton is freed. |
+| `vortarisecs/general/max_snapshot_entities` | int, 500 | Cap on the editor remote-monitor Entities page (rows rendered from a snapshot). |
+| `vortarisecs/debug/auto_refresh_interval` | float, 1.0 | Seconds between auto-refresh requests in the editor "ECS" debugger tab. |
+| `vortarisecs/network/default_sync_priority` | enum, Medium | Sync tier applied to new component fields that don't specify one. |
+| `vortarisecs/observer/default_throttle_tick` | int, 0 | Default CHANGED throttle (change ticks) for newly created observers; 0 disables. |
+| `vortarisecs/serialization/compact_json` | bool, false | Whether snapshot JSON strings (`serialize_snapshot_json_string()`) are written compact (true) or pretty-printed (false). |
+
+All defaults are written only when the setting is absent, so a user's baked-in
+value is never clobbered (mirrors the ModLoader F4 fix).
+
+### API / docs / tests
+
+- New public API: `VECSWorld.serialize_snapshot_json_string()` (doc_class +
+  regression T36).
+- `VECSWorld.is_verbose()` now reports the persisted setting (new path with
+  legacy fallback) instead of the init-time cache.
+- New regression T36 covering settings defaults, the registration guard, the
+  verbose legacy-path fallback, and the effective reads of
+  `default_sync_priority` / `default_throttle_tick` / `compact_json`.
+- `plugin.cfg` version → `0.4.0`; README/README.zh-CN updated.
+
 ## 0.3.0 (2026-08-16)
 
 **Runtime remote monitoring GUI.** The editor can now inspect a **running** game's

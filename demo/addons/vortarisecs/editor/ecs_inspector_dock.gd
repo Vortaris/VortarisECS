@@ -92,6 +92,7 @@ func _dump_snapshot() -> void:
 	_resolve_world()
 	if _world == null:
 		return
-	var save: Dictionary = _world.serialize_snapshot_json()
-	print("[VortarisECS Inspector] snapshot: %s" % JSON.stringify(save, "\t"))
-	snapshot_label.text = "snapshot dumped (%d bytes of JSON)" % JSON.stringify(save).length()
+	# Honors vortarisecs/serialization/compact_json (compact vs pretty JSON).
+	var text: String = _world.serialize_snapshot_json_string()
+	print("[VortarisECS Inspector] snapshot: %s" % text)
+	snapshot_label.text = "snapshot dumped (%d bytes of JSON)" % text.to_utf8_buffer().size()

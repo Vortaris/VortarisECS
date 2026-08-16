@@ -374,12 +374,20 @@
 				把整个世界序列化为可 JSON 化的 [Dictionary]：[code]{"version": int, "entities": [...]}[/code]。把它传给 [method JSON.stringify] 即可写出存档文件。
 			</description>
 		</method>
+		<method name="serialize_snapshot_json_string">
+			<return type="String" />
+			<description>
+				Serializes the whole world as a JSON [String] ready to write to a save file. Honors the [code]vortarisecs/serialization/compact_json[/code] project setting: [code]true[/code] writes compact (unindented) JSON, [code]false[/code] writes pretty-printed JSON with tab indentation.
+
+				把整个世界序列化为可直接写入存档文件的 JSON [String]。遵循 [code]vortarisecs/serialization/compact_json[/code] 项目设置：[code]true[/code] 输出紧凑（无缩进）JSON，[code]false[/code] 输出带制表符缩进的格式化 JSON。
+			</description>
+		</method>
 		<method name="is_verbose" qualifiers="const">
 			<return type="bool" />
 			<description>
-				Returns [code]true[/code] when detailed verbose logging is active for this process (debug build AND the [code]vortarisecs/verbose[/code] project setting). In release builds this always returns [code]false[/code].
+				Returns [code]true[/code] when detailed verbose logging is active for this process (debug build AND the [code]vortarisecs/general/verbose[/code] project setting, which falls back to the legacy [code]vortarisecs/verbose[/code] path from 0.3.0). In release builds this always returns [code]false[/code].
 
-				返回当前进程是否启用了详细 verbose 日志（debug 构建且 [code]vortarisecs/verbose[/code] 项目设置为真）。release 构建恒返回 [code]false[/code]。
+				返回当前进程是否启用了详细 verbose 日志（debug 构建且 [code]vortarisecs/general/verbose[/code] 项目设置为真，并回退兼容 0.3.0 的旧 [code]vortarisecs/verbose[/code] 路径）。release 构建恒返回 [code]false[/code]。
 			</description>
 		</method>
 		<method name="set_entity_range">
@@ -407,9 +415,9 @@
 			<return type="void" />
 			<param index="0" name="on" type="bool" />
 			<description>
-				Enables or disables detailed verbose logging for this process. Also writes the [code]vortarisecs/verbose[/code] project setting so the runtime toggle and the persisted setting stay in sync. Verbose logs are only emitted in debug builds; in release builds this is a no-op. See also [method is_verbose].
+				Enables or disables detailed verbose logging for this process. Also writes the [code]vortarisecs/general/verbose[/code] project setting so the runtime toggle and the persisted setting stay in sync. Verbose logs are only emitted in debug builds; in release builds this is a no-op. See also [method is_verbose].
 
-				开启或关闭当前进程的详细 verbose 日志，同时写入 [code]vortarisecs/verbose[/code] 项目设置，使运行时开关与持久化设置保持一致。verbose 日志仅在 debug 构建中输出；release 构建中此方法为空操作。另见 [method is_verbose]。
+				开启或关闭当前进程的详细 verbose 日志，同时写入 [code]vortarisecs/general/verbose[/code] 项目设置，使运行时开关与持久化设置保持一致。verbose 日志仅在 debug 构建中输出；release 构建中此方法为空操作。另见 [method is_verbose]。
 			</description>
 		</method>
 		<method name="shutdown">

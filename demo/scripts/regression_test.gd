@@ -40,6 +40,10 @@ extends SceneTree
 #   T34 failed JSON snapshot load restores the live world instead of clearing it
 # 0.3.0 additions:
 #   T35 get_snapshot_data() remote-monitor snapshot structure
+# 0.4.0 additions:
+#   T36 hierarchical project settings (defaults, registration guard, verbose
+#       backward compatibility, default_sync_priority / default_throttle_tick /
+#       compact_json effective reads)
 
 const EcsTestUtil := preload("res://scripts/ecs_test_util.gd")
 
@@ -78,6 +82,7 @@ func _initialize() -> void:
 	_test_t33_verbose_flag(t)
 	_test_t34_bad_snapshot_preserves_world(t)
 	_test_t35_snapshot_data(t)
+	_test_t36_settings(t)
 	print("total=", t.total, " failures=", t.failures)
 	if t.failures == 0:
 		print("=== VortarisECS Regression OK ===")
@@ -913,7 +918,7 @@ func _test_t32_sync_throttle(t: RefCounted) -> void:
 
 
 # T33: verbose logging flag — VECS.set_verbose / is_verbose and the
-# vortarisecs/verbose project setting they write.
+# vortarisecs/general/verbose project setting they write.
 func _test_t33_verbose_flag(t: RefCounted) -> void:
 	if not OS.is_debug_build():
 		print("skip T33 (release build)")
@@ -923,10 +928,10 @@ func _test_t33_verbose_flag(t: RefCounted) -> void:
 	t.expect_eq(w.is_verbose(), false, "T33: verbose off by default")
 	w.set_verbose(true)
 	t.expect_eq(w.is_verbose(), true, "T33: set_verbose(true) enables verbose")
-	t.expect_eq(bool(ProjectSettings.get_setting("vortarisecs/verbose", false)), true, "T33: project setting written on")
+	t.expect_eq(bool(ProjectSettings.get_setting("vortarisecs/general/verbose", false)), true, "T33: project setting written on")
 	w.set_verbose(false)
 	t.expect_eq(w.is_verbose(), false, "T33: set_verbose(false) disables verbose")
-	t.expect_eq(bool(ProjectSettings.get_setting("vortarisecs/verbose", false)), false, "T33: project setting reset")
+	t.expect_eq(bool(ProjectSettings.get_setting("vortarisecs/general/verbose", false)), false, "T33: project setting reset")
 
 
 # T34: loading a partially-broken snapshot must NOT clear the live world. A save
@@ -1043,3 +1048,90 @@ func _test_t35_snapshot_data(t: RefCounted) -> void:
 	w.remove_system(sys)
 	sys.free()
 	w.free()
+
+
+# T36: hierarchical project settings (0.4.0). Verifies the registered defaults,
+# the has_setting guard (a user-set value is not re-defaulted), the verbose
+# backward-compatibility fallback to the legacy flat path, and that the new
+# default_sync_priority / default_throttle_tick / compact_json settings take
+# effect where documented.
+func _test_t36_settings(t: RefCounted) -> void:
+	print("-- T36: hierarchical project settings --")
+
+	# --- registered with the documented defaults ---
+	var defaults := {
+		"vortarisecs/general/auto_shutdown_on_exit": true,
+		"vortarisecs/general/max_snapshot_entities": 500,
+		"vortarisecs/debug/auto_refresh_interval": 1.0,
+		"vortarisecs/network/default_sync_priority": 2,  # SYNC_MEDIUM
+		"vortarisecs/observer/default_throttle_tick": 0,
+		"vortarisecs/serialization/compact_json": false,
+	}
+	for setting in defaults:
+		t.expect(ProjectSettings.has_setting(setting), "T36: %s registered" % setting)
+		var val: Variant = ProjectSettings.get_setting(setting)
+		if val is float:
+			t.expect(absf(val - defaults[setting]) < 0.0001, "T36: %s default %s" % [setting, str(defaults[setting])])
+		else:
+			t.expect_eq(val, defaults[setting], "T36: %s default" % setting)
+
+	# --- has_setting guard: a user-set value is not re-defaulted on read ---
+	var saved_max: Variant = ProjectSettings.get_setting("vortarisecs/general/max_snapshot_entities", 500)
+	ProjectSettings.set_setting("vortarisecs/general/max_snapshot_entities", 42)
+	t.expect_eq(int(ProjectSettings.get_setting("vortarisecs/general/max_snapshot_entities")), 42,
+			"T36: user value preserved (has_setting guard)")
+	ProjectSettings.set_setting("vortarisecs/general/max_snapshot_entities", saved_max)
+
+	# --- verbose backward compatibility: legacy flat path is honored ---
+	if OS.is_debug_build():
+		var saved_new: Variant = ProjectSettings.get_setting("vortarisecs/general/verbose", false)
+		# Simulate a 0.3.0-only project: no canonical path, legacy path set.
+		ProjectSettings.clear("vortarisecs/general/verbose")
+		ProjectSettings.set_setting("vortarisecs/verbose", true)
+		t.expect_eq(VECS.get_world().is_verbose(), true,
+				"T36: legacy vortarisecs/verbose=true honored via fallback")
+		ProjectSettings.set_setting("vortarisecs/verbose", false)
+		t.expect_eq(VECS.get_world().is_verbose(), false,
+				"T36: legacy vortarisecs/verbose=false honored")
+		# Restore the canonical path (registered at module init, so it existed
+		# before this test cleared it) and neutralize the legacy path.
+		ProjectSettings.set_setting("vortarisecs/general/verbose", saved_new)
+		ProjectSettings.set_setting("vortarisecs/verbose", false)
+
+	# --- default_sync_priority applies to fields that don't specify one ---
+	var saved_prio: Variant = ProjectSettings.get_setting("vortarisecs/network/default_sync_priority", 2)
+	var w: VECSWorld = VECSWorld.new()
+	ProjectSettings.set_setting("vortarisecs/network/default_sync_priority", 5)  # SYNC_LOCAL
+	w.register_component("T36C", [{"name": "v", "type": "F32"}])
+	t.expect_eq(w.get_component_type("T36C").get_field_sync_priority("v"), 5,
+			"T36: default_sync_priority applies to unset field")
+	# An explicit sync_priority still wins over the setting.
+	ProjectSettings.set_setting("vortarisecs/network/default_sync_priority", 1)  # SYNC_HIGH
+	w.register_component("T36C2", [{"name": "v", "type": "F32", "sync_priority": 0}])  # REALTIME
+	t.expect_eq(w.get_component_type("T36C2").get_field_sync_priority("v"), 0,
+			"T36: explicit sync_priority wins over default")
+	w.free()
+	ProjectSettings.set_setting("vortarisecs/network/default_sync_priority", saved_prio)
+
+	# --- default_throttle_tick seeds newly created observers ---
+	var saved_throttle: Variant = ProjectSettings.get_setting("vortarisecs/observer/default_throttle_tick", 0)
+	ProjectSettings.set_setting("vortarisecs/observer/default_throttle_tick", 3)
+	var obs: VECSObserver = VECSObserver.new()
+	t.expect_eq(obs.get_throttle_tick(), 3, "T36: default_throttle_tick seeds new observer")
+	obs.free()
+	ProjectSettings.set_setting("vortarisecs/observer/default_throttle_tick", saved_throttle)
+
+	# --- compact_json controls the snapshot JSON string format ---
+	var sw: VECSWorld = VECSWorld.new()
+	sw.register_component("T36J", [{"name": "x", "type": "I32"}])
+	var e: VECSEntity = sw.create_entity()
+	e.add_component("T36J", {"x": 7})
+	ProjectSettings.set_setting("vortarisecs/serialization/compact_json", false)
+	var pretty: String = sw.serialize_snapshot_json_string()
+	t.expect(pretty.contains("\n") or pretty.contains("\t"), "T36: compact_json=false pretty-prints")
+	ProjectSettings.set_setting("vortarisecs/serialization/compact_json", true)
+	var compact: String = sw.serialize_snapshot_json_string()
+	t.expect(not compact.contains("\n") and not compact.contains("\t"), "T36: compact_json=true writes compact JSON")
+	t.expect_eq(bool(sw.deserialize_snapshot_json(compact)), true, "T36: compact JSON round-trips")
+	sw.free()
+	ProjectSettings.set_setting("vortarisecs/serialization/compact_json", false)

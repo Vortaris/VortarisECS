@@ -146,7 +146,7 @@ extends RefCounted
 
 func execute(scene_tree: SceneTree) -> Variant:
 	var world: VECSWorld = Engine.get_singleton("VECS").get_world()
-	world.set_verbose(true)   # also writes the vortarisecs/verbose project setting
+	world.set_verbose(true)   # also writes the vortarisecs/general/verbose project setting
 	return world.is_verbose()
 ```
 
@@ -166,7 +166,7 @@ stats and snapshots reflect the real game world. Output lines are prefixed with
 | Argument | Effect | Exit code |
 |---|---|---|
 | `--vortaris-ecs-stats` | Prints `get_debug_stats()` as JSON, quits. | 0 |
-| `--vortaris-ecs-snapshot <path>` | Exports `serialize_snapshot_json()` to `<path>` (relative paths land in `user://`), prints the destination, quits. | 0 on success, 1 on write failure |
+| `--vortaris-ecs-snapshot <path>` | Exports `serialize_snapshot_json_string()` (honors `vortarisecs/serialization/compact_json`) to `<path>` (relative paths land in `user://`), prints the destination, quits. | 0 on success, 1 on write failure |
 | `--vortaris-ecs-overlay on\|off` | Enables/disables the runtime overlay, **keeps the game running** (no quit). | runs until the game exits |
 | anything else | Prints usage and quits. | 1 |
 
@@ -219,7 +219,9 @@ live world:
   `VECSQueryBuilder.get_last_execution_time_usec()`).
 - **Browser** — "Refresh" lists every entity → component → field as an expandable
   tree (`world.entities_to_data()`).
-- **Snapshot** — "Export Snapshot" writes `serialize_snapshot_json()` to
+- **Snapshot** — "Export Snapshot" writes
+  `serialize_snapshot_json_string()` (honoring
+  `vortarisecs/serialization/compact_json`) to
   `user://vortarisecs_snapshot.json`; "Import Snapshot" loads it back.
 
 **Off by default.** Enable it with the startup argument

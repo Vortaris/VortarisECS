@@ -10,10 +10,19 @@
 #include "../core/query.h"
 #include "../core/world.h"
 #include "vecs_entity.h"
+#include "vecs_settings.h"
 #include "vecs_world.h"
 
 VARIANT_ENUM_CAST(VECSObserver::Event);
 VARIANT_ENUM_CAST(VECSObserver::FlushMode);
+
+VECSObserver::VECSObserver() {
+	// Seed the CHANGED throttle from the project setting so newly created
+	// observers pick up `vortarisecs/observer/default_throttle_tick` (0 by
+	// default => no throttling). A script can still call set_throttle_tick()
+	// explicitly to override it.
+	throttle_tick_ = vortaris::get_default_throttle_tick();
+}
 
 void VECSObserver::set_events(int p_mask) {
 	event_mask_ = p_mask;

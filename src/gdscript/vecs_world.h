@@ -114,9 +114,12 @@ public:
 	// ---- debug / logging ----
 	godot::Dictionary get_debug_stats() const;
 	// Enables/disables detailed verbose logging for this process (also writes the
-	// `vortarisecs/verbose` project setting). Verbose logs are only emitted in
-	// debug builds; in release builds this is a no-op.
+	// `vortarisecs/general/verbose` project setting). Verbose logs are only
+	// emitted in debug builds; in release builds this is a no-op.
 	void set_verbose(bool p_on);
+	// Whether detailed verbose logging is active for this process: debug build
+	// AND the `vortarisecs/general/verbose` project setting (with fallback to
+	// the legacy `vortarisecs/verbose` path). Always false in release builds.
 	bool is_verbose() const;
 
 	// ---- remote runtime monitor (EngineDebugger) ----
@@ -161,6 +164,9 @@ public:
 	godot::Array entities_to_data();
 	// World save as a JSON-able Dictionary: { "version", "entities": [...] }.
 	godot::Dictionary serialize_snapshot_json();
+	// World save as a JSON String. Honors `vortarisecs/serialization/compact_json`:
+	// true => compact (unindented) JSON, false => pretty-printed with tabs.
+	godot::String serialize_snapshot_json_string();
 	// Loads a world save. Accepts either a Dictionary or a JSON String (parsed with Godot's JSON).
 	bool deserialize_snapshot_json(const godot::Variant &p_data);
 	// Like deserialize_snapshot_json, but also returns the id mapping produced by

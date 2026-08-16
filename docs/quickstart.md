@@ -99,7 +99,7 @@ in [`AI_DEBUGGING.md`](AI_DEBUGGING.md):
   - `godot --headless --path demo -- --vortaris-ecs-stats` — print
     `get_debug_stats()` JSON and exit 0.
   - `godot --headless --path demo -- --vortaris-ecs-snapshot save.json` — export
-    `serialize_snapshot_json()` to `user://` and exit 0.
+    `serialize_snapshot_json_string()` to `user://` and exit 0.
 - **Runtime overlay** (`--vortaris-ecs-overlay on`, or toggle with **F2** while
   the game runs) — an in-game HUD with live stats, an entity→component→field
   browser and JSON snapshot export/import.
@@ -107,4 +107,5 @@ in [`AI_DEBUGGING.md`](AI_DEBUGGING.md):
   (`Engine.get_singleton("VECS").get_world()`).
 
 Also new: `world.set_verbose(true)` / `world.is_verbose()` toggle tiered verbose
-logging (debug builds only, gated by the `vortarisecs/verbose` project setting).
+logging (debug builds only, gated by the `vortarisecs/general/verbose` project
+setting — with fallback to the legacy `vortarisecs/verbose` path from 0.3.0).

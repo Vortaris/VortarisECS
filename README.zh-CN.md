@@ -19,6 +19,13 @@
 - **确定性二进制序列化** —— 小端、定宽、逐字节一致（byte-identical）的快照。
 - **可插拔网络同步** —— `VECSSyncStrategy` 抽象 + 默认的服务器权威快照复制（脏检查增量 + 定期对账 + 反幽灵）。传输层是 Godot 的 MultiplayerAPI（RPC），另附进程内直连测试传输。
 
+## 0.4.0 新特性
+
+- **分层项目设置** —— 设置从扁平的 `vortarisecs/verbose` 重组为 `vortarisecs/<分类>/<名称>`，在“项目设置 > VortarisECS”下分组显示：`vortarisecs/general/verbose`（由 0.3.0 的扁平路径迁移而来，仍兼容回退）、`vortarisecs/general/auto_shutdown_on_exit`、`vortarisecs/general/max_snapshot_entities`、`vortarisecs/debug/auto_refresh_interval`、`vortarisecs/network/default_sync_priority`、`vortarisecs/observer/default_throttle_tick` 与 `vortarisecs/serialization/compact_json`。默认值仅在缺失时写入，绝不覆盖用户已有设置。
+- **原先硬编码的默认值变为设置项** —— 新组件字段的同步档位、observer 的 CHANGED 节流、编辑器远程监控的实体上限 / 自动刷新间隔、退出时的 `shutdown()` 清理，以及快照 JSON 字符串是否紧凑输出。
+- **`VECSWorld.serialize_snapshot_json_string()`** —— 以 String 形式导出 JSON 存档，遵循 `vortarisecs/serialization/compact_json`（紧凑 vs 格式化）。
+- **`VECSWorld.is_verbose()`** 现读取持久化设置（含旧路径回退），而非初始化时的快照缓存。
+
 ## 0.3.0 新特性
 
 - **运行时远程监控 GUI** —— 游戏运行时，编辑器调试器底部面板新增 **“ECS”** 选项卡，实时显示**运行中**游戏的 ECS 世界：Entities（实体 id → 组件 → 字段）、Components（组件注册表及字段元数据）、Systems（名称/分组/启用状态）与 Stats（世界统计）。原理同 Godot 场景树的 Remote 模式：编辑器经 `EngineDebugger` 发送 `vecs:req_snapshot`，游戏用新的 `VECSWorld.get_snapshot_data()` 回发 `vecs:snapshot`。提供“刷新”按钮与可选 ~1Hz 自动刷新；快照仅按需发送。
@@ -231,7 +238,8 @@ w.for_each<Position>([&](vortaris::Entity e, Position &pos) {
 
 ```gdscript
 # 世界存档：序列化 → stringify → 写文件
-var text: String = JSON.stringify(world.serialize_snapshot_json(), "\t")
+var text: String = world.serialize_snapshot_json_string()  # 遵循 vortarisecs/serialization/compact_json
+# ……或手动 stringify：JSON.stringify(world.serialize_snapshot_json(), "\t")
 FileAccess.open("user://save.json", FileAccess.WRITE).store_string(text)
 
 # 读档：读文件 → 直接把 JSON 字符串喂回去

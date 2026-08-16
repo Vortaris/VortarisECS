@@ -1,24 +1,21 @@
 #include "vecs_log.h"
 
-#include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/core/print_string.hpp>
+
+#include "vecs_settings.h"
 
 namespace vortaris {
 
 void set_verbose(bool p_on) {
 #ifdef DEBUG_ENABLED
 	g_verbose_active = p_on;
-	if (godot::ProjectSettings::get_singleton()) {
-		godot::ProjectSettings::get_singleton()->set_setting("vortarisecs/verbose", p_on);
-	}
+	vortaris::set_verbose_setting(p_on);
 #endif
 }
 
 void refresh_verbose() {
 #ifdef DEBUG_ENABLED
-	if (godot::ProjectSettings::get_singleton()) {
-		g_verbose_active = godot::ProjectSettings::get_singleton()->get_setting("vortarisecs/verbose", false);
-	}
+	g_verbose_active = vortaris::get_verbose_setting();
 #endif
 }
 

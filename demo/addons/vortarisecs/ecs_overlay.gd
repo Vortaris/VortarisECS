@@ -209,8 +209,8 @@ func _export_snapshot() -> void:
 	_resolve_world()
 	if _world == null:
 		return
-	var save: Dictionary = _world.serialize_snapshot_json()
-	var text: String = JSON.stringify(save, "\t")
+	# Honors vortarisecs/serialization/compact_json (compact vs pretty JSON).
+	var text: String = _world.serialize_snapshot_json_string()
 	var f := FileAccess.open(SNAPSHOT_PATH, FileAccess.WRITE)
 	if f == null:
 		_set_status("export failed: cannot open " + SNAPSHOT_PATH)

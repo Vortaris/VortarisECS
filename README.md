@@ -22,6 +22,28 @@ Design reference: [GECS](https://github.com/BlockBreaker-Studios/GECS) — its a
 - **Deterministic binary serialization** — little-endian, fixed-width, byte-identical snapshots.
 - **Pluggable network sync** — `VECSSyncStrategy` abstraction with a default server-authoritative snapshot replication (dirty-checked deltas + periodic reconciliation + anti-ghost). Transport is Godot's MultiplayerAPI (RPC), with a direct in-process test transport.
 
+## What's new in 0.4.0
+
+- **Hierarchical project settings** — settings reorganized from the flat
+  `vortarisecs/verbose` into `vortarisecs/<category>/<name>`, so they group under
+  Project Settings > VortarisECS:
+  `vortarisecs/general/verbose` (migrated from the 0.3.0 flat path, still
+  honored as a fallback), `vortarisecs/general/auto_shutdown_on_exit`,
+  `vortarisecs/general/max_snapshot_entities`,
+  `vortarisecs/debug/auto_refresh_interval`,
+  `vortarisecs/network/default_sync_priority`,
+  `vortarisecs/observer/default_throttle_tick` and
+  `vortarisecs/serialization/compact_json`. Defaults are only seeded when
+  absent, so a user's value is never clobbered.
+- **Previously hard-coded defaults became settings** — the sync tier for new
+  component fields, the observer CHANGED throttle, the editor remote-monitor
+  entity cap / auto-refresh interval, the exit-time `shutdown()` cleanup, and
+  whether snapshot JSON strings are compact.
+- **`VECSWorld.serialize_snapshot_json_string()`** — JSON save as a String,
+  honoring `vortarisecs/serialization/compact_json` (compact vs pretty).
+- **`VECSWorld.is_verbose()`** now reports the persisted setting (with legacy
+  fallback) rather than an init-time snapshot.
+
 ## What's new in 0.3.0
 
 - **Runtime remote monitoring GUI** — while a game runs, the editor's debugger
@@ -293,7 +315,8 @@ Deeply integrated with Godot's own `JSON` class — pass in/out plain
 
 ```gdscript
 # World save (archive): serialize → stringify → write file
-var text: String = JSON.stringify(world.serialize_snapshot_json(), "\t")
+var text: String = world.serialize_snapshot_json_string()  # honors vortarisecs/serialization/compact_json
+# ... or stringify manually: JSON.stringify(world.serialize_snapshot_json(), "\t")
 FileAccess.open("user://save.json", FileAccess.WRITE).store_string(text)
 
 # Load: read file → feed the JSON string straight back in
