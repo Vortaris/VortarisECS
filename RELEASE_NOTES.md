@@ -1,5 +1,71 @@
 # VortarisECS Release Notes
 
+## 0.3.1 (unreleased)
+
+Changes driven by real usage research in the CHANT project (162 hand-written
+`get_field/set_field/getf/setf` calls with explicit `int()/float()/bool()/str()`
+casts, ~15 full-table+hand-compare "owner" scans, two hand-rolled
+"row -> component dict" spawns, per-frame UI polling, and manual fixed-array
+rebuilds):
+
+### Typed field access (kills the explicit casts)
+
+- `VECSComponent.get_int / get_float / get_bool / get_string / get_vector` —
+  read a field and return it as the requested Variant type, so callers can drop
+  `int()` / `float()` / `bool()` / `str()` / `Vector3()` casts. A missing
+  component/field returns the type's zero value.
+- `VECSEntity.getf_int / getf_float / getf_bool / getf_string / getf_vector` —
+  the same convenience in one call.
+
+### Query field-equality filter (kills the O(N×M) owner scans)
+
+- `VECSQueryBuilder.field_equals(comp, field, value)` — filters to entities that
+  have the component AND whose field equals `value`. The comparison runs
+  entirely in C++ (no per-entity GDScript callback):
+  `world.query().with_all(["Combatant"]).field_equals("Combatant", "owner", eid).execute()`.
+  Chainable (AND), applied by `execute` / `execute_one` / `count`. Equality uses
+  GDScript `==` semantics (an F32 `0.0` matches an int `0`).
+
+### Entity spawn convenience (kills the hand-rolled spawns)
+
+- `VECSWorld.create_with_components(def_id, components)` — merge of
+  `create_entity[_preassigned]` + `add_component`. Absent component fields are
+  filled with their schema default (zero / empty string / false / zeroed array
+  slots), so a row's sparse fields spawn complete components. Returns a null
+  handle on failure (unregistered component / id conflict) without leaving a
+  half-spawned entity.
+- `spawn_from_data` / `spawn` already filled schema defaults; this is now
+  documented and covered by a regression test.
+
+### GDScript-usable observer (kills per-frame polling)
+
+- **Root cause fixed**: `VECSObserver` was registered with
+  `GDREGISTER_VIRTUAL_CLASS`, which blocks direct GDScript instantiation. It is
+  now a concrete class (`GDREGISTER_CLASS`), so `VECSObserver.new()` works.
+- `VECSObserver.set_callback(callable)` — a plain callback
+  `(event: int, entity: VECSEntity, payload: Variant)` drives the observer; no
+  subclassing required. Takes precedence over a `_script_each` override.
+- `VECSWorld.create_observer(callable, opts)` — one-call factory: creates,
+  configures (events / components / fields / match_components /
+  custom_event_name / throttle_tick / flush_mode), and registers an observer.
+- `VECSWorld.on_changed(comp, opts)` — thin convenience for the exact CHANT
+  polling replacement: `world.on_changed("Combatant", {"fields": ["hp"],
+  "callable": cb})`.
+
+### Array-field convenience (kills the manual rebuild + 0-sentinel scan)
+
+- `VECSComponent.field_contains(name, value)` — true when a scalar field equals
+  the value or any element of a fixed-array field equals it. One-call
+  membership check instead of "rebuild the array and scan for a 0-sentinel".
+
+### Docs / tests / version
+
+- Regression suite is now T1–T42 / 286 assertions (new T39 typed access, T40
+  field_equals, T41 create_with_components + schema defaults, T42 GDScript
+  observer).
+- `doc_classes/*.xml` updated for every new method (English + Chinese).
+- `plugin.cfg` version → `0.3.1`; README / README.zh-CN updated.
+
 ## 0.3.0 review fixes (unreleased)
 
 Fixes from the 0.3.0 adversarial review:

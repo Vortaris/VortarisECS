@@ -22,6 +22,33 @@ Design reference: [GECS](https://github.com/BlockBreaker-Studios/GECS) — its a
 - **Deterministic binary serialization** — little-endian, fixed-width, byte-identical snapshots.
 - **Pluggable network sync** — `VECSSyncStrategy` abstraction with a default server-authoritative snapshot replication (dirty-checked deltas + periodic reconciliation + anti-ghost). Transport is Godot's MultiplayerAPI (RPC), with a direct in-process test transport.
 
+## What's new in 0.3.1
+
+Quality-of-life API built from real usage in the CHANT project (162 hand-written
+typed casts, ~15 "scan the whole table and compare owner by hand" queries, two
+hand-rolled spawns, per-frame UI polling):
+
+- **Typed field access** — `VECSComponent.get_int / get_float / get_bool /
+  get_string / get_vector` and `VECSEntity.getf_int / getf_float / getf_bool /
+  getf_string / getf_vector` read a field directly as the requested type, so
+  `int(comp.get_field("hp"))` becomes `comp.get_int("hp")`.
+- **Query field-equality filter** — `query().with_all(["Combatant"])
+  .field_equals("Combatant", "owner", eid).execute()` runs the comparison in C++
+  (no per-entity GDScript callback), replacing the full-table + hand-compare
+  scans. Chainable (AND); applied by `execute` / `execute_one` / `count`.
+- **Entity spawn convenience** — `world.create_with_components(def_id, {
+  "Comp": {fields...} })` merges create + add_component and fills absent fields
+  with their schema default (0 / empty string / false / zeroed array slots).
+- **GDScript-usable observer** — `VECSObserver` is now a concrete class
+  (`VECSObserver.new()` works directly, root cause: it was registered as a
+  virtual class), plus `set_callback(callable)`,
+  `world.create_observer(callable, opts)` and the CHANT-targeted
+  `world.on_changed("Combatant", {"fields": ["hp"], "callable": cb})` — a drop-in
+  replacement for per-frame polling.
+- **Array membership** — `VECSComponent.field_contains(name, value)` checks a
+  scalar or any array element in one call (the "rebuild the array and scan for a
+  0-sentinel" idiom collapses).
+
 ## What's new in 0.3.0
 
 - **Hierarchical project settings** — settings reorganized from the flat

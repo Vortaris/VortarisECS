@@ -16,7 +16,7 @@ scons -j 8 platform=windows target=template_debug arch=x86_64 build_library=Fals
 # Functional demo (expect "=== VortarisECS Demo OK ===", exit 0)
 godot --headless --path demo
 
-# Regression suite (T1–T38, 223 assertions; exit 0 = all pass)
+# Regression suite (T1–T42, 286 assertions; exit 0 = all pass)
 godot --headless --path demo --script res://scripts/regression_test.gd
 
 # Minimal convenience-API example + perf baseline
@@ -96,7 +96,7 @@ into a scratch buffer).
 No C++ unit tests (core depends on godot-cpp runtime). Regression coverage is
 GDScript headless scripts in `demo/scripts/`:
 `ecs_test_util.gd` (assert helper) + `regression_test.gd` (`extends SceneTree`,
-runs T1–T38, 223 assertions, `quit(0/1)`). Add a numbered `_test_tN_*` for any
+runs T1–T42, 286 assertions, `quit(0/1)`). Add a numbered `_test_tN_*` for any
 new behavior and call it from `_initialize()`. The functional `main.gd` demo
 doubles as a smoke test for the full feature set end-to-end.
 

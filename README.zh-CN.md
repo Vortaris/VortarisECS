@@ -19,6 +19,16 @@
 - **确定性二进制序列化** —— 小端、定宽、逐字节一致（byte-identical）的快照。
 - **可插拔网络同步** —— `VECSSyncStrategy` 抽象 + 默认的服务器权威快照复制（脏检查增量 + 定期对账 + 反幽灵）。传输层是 Godot 的 MultiplayerAPI（RPC），另附进程内直连测试传输。
 
+## 0.3.1 新特性
+
+基于 CHANT 项目实际使用沉淀的易用性 API（162 处手写类型强转、约 15 处"全表扫描再手比 owner"的查询、两处手写生成、每帧轮询 UI、固定数组手工重建）：
+
+- **类型化字段访问** —— `VECSComponent.get_int / get_float / get_bool / get_string / get_vector` 与 `VECSEntity.getf_int / getf_float / getf_bool / getf_string / getf_vector` 直接把字段读成所需类型，`int(comp.get_field("hp"))` 变为 `comp.get_int("hp")`。
+- **查询字段相等过滤** —— `query().with_all(["Combatant"]).field_equals("Combatant", "owner", eid).execute()` 在 C++ 侧完成比较（无逐实体 GDScript 回调），替代"全表查询 + 手比 owner"的扫描。可链式（AND）；`execute` / `execute_one` / `count` 均生效。
+- **实体生成便捷** —— `world.create_with_components(def_id, {"Comp": {字段...}})` 合并 create + add_component，缺失字段按 schema 默认值填充（0 / 空串 / false / 归零数组槽位）。
+- **GDScript 可用观察者** —— `VECSObserver` 现为具体类（`VECSObserver.new()` 可直接实例化；根因是此前注册为 virtual 类），并提供 `set_callback(callable)`、`world.create_observer(callable, opts)` 以及面向 CHANT 的 `world.on_changed("Combatant", {"fields": ["hp"], "callable": cb})` —— 可直接替代每帧轮询。
+- **数组成员判断** —— `VECSComponent.field_contains(name, value)` 一次调用判断标量或任一数组元素是否等于某值（"重建数组并扫描 0 哨兵"的写法就此收敛）。
+
 ## 0.3.0 新特性
 
 - **分层项目设置** —— 设置从扁平的 `vortarisecs/verbose` 重组为 `vortarisecs/<分类>/<名称>`，在“项目设置 > VortarisECS”下分组显示：`vortarisecs/general/verbose`（由 0.3.0 的扁平路径迁移而来，仍兼容回退）、`vortarisecs/general/auto_shutdown_on_exit`、`vortarisecs/general/max_snapshot_entities`、`vortarisecs/debug/auto_refresh_interval`、`vortarisecs/network/default_sync_priority`、`vortarisecs/observer/default_throttle_tick` 与 `vortarisecs/serialization/compact_json`。默认值仅在缺失时写入，绝不覆盖用户已有设置。

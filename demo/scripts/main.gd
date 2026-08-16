@@ -205,6 +205,33 @@ func _ready() -> void:
 	var sep: VECSComponent = se.get_component("Position")
 	print("script-moved position.x = ", sep.get_field("x"))  # expect 1.0
 
+	# --- 0.3.1: 类型化字段访问 / field_equals / create_with_components / observer ---
+	world.register_component("Combatant", [
+		{"name": "hp", "type": "F32"},
+		{"name": "level", "type": "I32"},
+		{"name": "owner", "type": "I64"},
+	])
+	var a1: VECSEntity = world.create_with_components(0, {"Combatant": {"hp": 30.0, "owner": 7}})
+	var a2: VECSEntity = world.create_with_components(0, {"Combatant": {"hp": 80.0, "owner": 9}})
+	# Typed getters: no int()/float() casts needed.
+	var lvl: int = a1.getf_int("Combatant", "level")  # schema default 0
+	var hp: float = a1.getf_float("Combatant", "hp")
+	print("typed getters: hp=", hp, " level(default)= ", lvl)
+	# field_equals in C++: the CHANT "scan the whole table for my owner" query.
+	var owned: Array = world.query().with_all(["Combatant"]).field_equals("Combatant", "owner", 7).execute()
+	print("field_equals owner==7 count = ", owned.size())
+	# on_changed: event-driven instead of polling hp every frame.
+	var hp_changes := []
+	var cob: VECSObserver = world.on_changed("Combatant", {
+		"fields": ["hp"],
+		"callable": func(_ev: int, ent: VECSEntity, _p: Variant) -> void:
+			hp_changes.append(ent.get_id()),
+	})
+	a1.get_component("Combatant").set_field("hp", 31.0)
+	print("on_changed hp callback fired = ", hp_changes.size() > 0)
+	world.remove_observer(cob)
+	cob.free()
+
 	# --- 活跃集 + 事件驱动:沙子下落 (事件进入活跃集,系统只处理活跃集) ---
 	world.register_component("Falling", [{"name": "time", "type": "F32"}])
 

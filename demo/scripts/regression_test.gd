@@ -48,6 +48,13 @@ extends SceneTree
 # 0.3.0 review fixes (0.4.0):
 #   T37 debug_set_field now ALSO rejects type mismatches (E2)
 #   T38 snapshot truncation honors max_snapshot_entities (E1)
+# 0.3.1 additions:
+#   T39 typed field access (get_int/get_float/get_bool/get_string/get_vector +
+#       entity getf_* — no explicit int()/float()/bool()/str() casts)
+#   T40 query field_equals (hit / miss / chain / count / execute_one)
+#   T41 create_with_components + schema default filling (0/empty/false/array 0)
+#   T42 GDScript-usable observer (VECSObserver.new + set_callback +
+#       world.create_observer / world.on_changed, field filter + throttle)
 
 const EcsTestUtil := preload("res://scripts/ecs_test_util.gd")
 
@@ -89,6 +96,10 @@ func _initialize() -> void:
 	_test_t36_settings(t)
 	_test_t37_debug_set_field(t)
 	_test_t38_snapshot_truncation(t)
+	_test_t39_typed_field_access(t)
+	_test_t40_query_field_equals(t)
+	_test_t41_create_with_components(t)
+	_test_t42_gdscript_observer(t)
 	print("total=", t.total, " failures=", t.failures)
 	if t.failures == 0:
 		print("=== VortarisECS Regression OK ===")
@@ -1264,3 +1275,248 @@ func _test_t38_snapshot_truncation(t: RefCounted) -> void:
 
 	w.free()
 	ProjectSettings.set_setting("vortarisecs/general/max_snapshot_entities", saved_max)
+
+
+# T39: typed field access — VECSComponent.get_int/get_float/get_bool/get_string/
+# get_vector and VECSEntity.getf_int/... read fields as the requested Variant
+# type, dropping the explicit int()/float()/bool()/str() casts.
+func _test_t39_typed_field_access(t: RefCounted) -> void:
+	print("-- T39: typed field access --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T39C", [
+		{"name": "level", "type": "I32"},
+		{"name": "hp", "type": "F32"},
+		{"name": "alive", "type": "Bool"},
+		{"name": "name", "type": "StringFixed", "count": 16},
+		{"name": "pos", "type": "Vector3"},
+		{"name": "arr", "type": "F32", "count": 3},
+	])
+	var e: VECSEntity = w.create_entity()
+	e.add_component("T39C", {"level": 3, "hp": 50.0, "alive": true, "name": "hero", "pos": Vector3(1, 2, 3), "arr": [1.0, 2.0, 3.0]})
+	var comp: VECSComponent = e.get_component("T39C")
+
+	# Component-level typed getters (no explicit casts).
+	t.expect_eq(int(comp.get_int("level")), 3, "T39: get_int reads I32")
+	t.expect_eq(float(comp.get_float("hp")), 50.0, "T39: get_float reads F32")
+	t.expect_eq(bool(comp.get_bool("alive")), true, "T39: get_bool reads Bool")
+	t.expect_eq(String(comp.get_string("name")), "hero", "T39: get_string reads StringFixed")
+	t.expect_eq(Vector3(comp.get_vector("pos")), Vector3(1, 2, 3), "T39: get_vector reads Vector3")
+	t.expect_eq(float(comp.get_array_element("arr", 1)), 2.0, "T39: array field still readable")
+
+	# Entity-level convenience.
+	t.expect_eq(int(e.getf_int("T39C", "level")), 3, "T39: getf_int")
+	t.expect_eq(float(e.getf_float("T39C", "hp")), 50.0, "T39: getf_float")
+	t.expect_eq(bool(e.getf_bool("T39C", "alive")), true, "T39: getf_bool")
+	t.expect_eq(String(e.getf_string("T39C", "name")), "hero", "T39: getf_string")
+	t.expect_eq(Vector3(e.getf_vector("T39C", "pos")), Vector3(1, 2, 3), "T39: getf_vector")
+
+	# Missing component / field => the type's zero value (never a script-side cast).
+	t.expect_eq(int(e.getf_int("Missing", "x")), 0, "T39: getf_int zero for missing component")
+	t.expect_eq(float(e.getf_float("T39C", "nope")), 0.0, "T39: getf_float zero for missing field")
+	t.expect_eq(bool(e.getf_bool("Missing", "x")), false, "T39: getf_bool false for missing component")
+	t.expect_eq(String(e.getf_string("T39C", "nope")), "", "T39: getf_string empty for missing field")
+	t.expect_eq(e.getf_vector("T39C", "nope"), null, "T39: getf_vector null for non-vector field")
+
+	# get_vector returns null for a non-vector field.
+	t.expect_eq(comp.get_vector("level"), null, "T39: get_vector null for scalar field")
+
+	# field_contains: array membership (the CHANT "0-sentinel scan" replacement).
+	t.expect_eq(bool(comp.field_contains("arr", 2.0)), true, "T39: field_contains finds array element")
+	t.expect_eq(bool(comp.field_contains("arr", 0.0)), false, "T39: field_contains misses absent element")
+	t.expect_eq(bool(comp.field_contains("arr", 2)), true, "T39: field_contains coerces int/float equality")
+	t.expect_eq(bool(comp.field_contains("level", 3)), true, "T39: field_contains scalar equal")
+	t.expect_eq(bool(comp.field_contains("level", 4)), false, "T39: field_contains scalar not equal")
+	t.expect_eq(bool(comp.field_contains("missing", 1)), false, "T39: field_contains unknown field false")
+
+	w.free()
+
+
+# T40: field_equals — C++-side equality filtering on a component field. This is
+# the replacement for the CHANT "query the whole table then hand-compare the
+# owner field" O(NxM) scans.
+func _test_t40_query_field_equals(t: RefCounted) -> void:
+	print("-- T40: query field_equals --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T40Own", [{"name": "owner", "type": "I64"}, {"name": "team", "type": "I32"}])
+	w.register_component("T40Cbt", [{"name": "hp", "type": "F32"}])
+
+	var e1: VECSEntity = w.create_entity()
+	e1.add_component("T40Own", {"owner": 100, "team": 1})
+	e1.add_component("T40Cbt", {"hp": 50.0})
+	var e2: VECSEntity = w.create_entity()
+	e2.add_component("T40Own", {"owner": 100, "team": 2})
+	e2.add_component("T40Cbt", {"hp": 60.0})
+	var e3: VECSEntity = w.create_entity()
+	e3.add_component("T40Own", {"owner": 200, "team": 1})
+	e3.add_component("T40Cbt", {"hp": 70.0})
+	# An entity WITHOUT the Owner component must never match an Owner filter.
+	var e4: VECSEntity = w.create_entity()
+	e4.add_component("T40Cbt", {"hp": 80.0})
+
+	var r: Array = w.query().with_all(["T40Own"]).field_equals("T40Own", "owner", 100).execute()
+	t.expect_eq(r.size(), 2, "T40: owner==100 hits 2 entities")
+	var r2: Array = w.query().with_all(["T40Own"]).field_equals("T40Own", "owner", 999).execute()
+	t.expect_eq(r2.size(), 0, "T40: owner==999 misses")
+
+	# count() applies the filter too.
+	t.expect_eq(int(w.query().with_all(["T40Own"]).field_equals("T40Own", "owner", 200).count()), 1,
+			"T40: count applies field_equals")
+
+	# execute_one() honours the filter.
+	var one: VECSEntity = w.query().with_all(["T40Own"]).field_equals("T40Own", "owner", 200).execute_one()
+	t.expect(one != null, "T40: execute_one returns a match")
+	t.expect_eq(int(one.get_component("T40Own").get_field("owner")), 200, "T40: execute_one returns the owner")
+
+	# Chain: owner==100 AND team==1 -> only e1.
+	var chained: Array = w.query().with_all(["T40Own"]).field_equals("T40Own", "owner", 100).field_equals("T40Own", "team", 1).execute()
+	t.expect_eq(chained.size(), 1, "T40: chained field_equals AND semantics")
+	t.expect_eq(chained[0].get_id(), e1.get_id(), "T40: chained match is e1")
+
+	# Float field equality (F32 field compared against a float).
+	var f: Array = w.query().with_all(["T40Cbt"]).field_equals("T40Cbt", "hp", 60.0).execute()
+	t.expect_eq(f.size(), 1, "T40: float field_equals")
+	t.expect_eq(f[0].get_id(), e2.get_id(), "T40: float match is e2")
+
+	# Cross-type numeric equality (GDScript `==` semantics): an int 60 matches an
+	# F32 field holding 60.0, and an int 0 would match an F32 field holding 0.
+	var x: Array = w.query().with_all(["T40Cbt"]).field_equals("T40Cbt", "hp", 60).execute()
+	t.expect_eq(x.size(), 1, "T40: int value matches F32 field")
+	t.expect_eq(x[0].get_id(), e2.get_id(), "T40: cross-type match is e2")
+
+	# Field filter on an entity that lacks the filtered component is excluded.
+	var no_own: Array = w.query().with_all(["T40Cbt"]).field_equals("T40Own", "owner", 100).execute()
+	t.expect_eq(no_own.size(), 2, "T40: entity without the component excluded (e1, e2)")
+
+	# Unknown component in field_equals is an error but the constraint is ignored
+	# (consistent with with_all's "unknown names are ignored") so the query runs
+	# unfiltered on that term.
+	var warn_count: int = w.query().with_all(["T40Own"]).field_equals("T40Missing", "owner", 1).execute().size()
+	t.expect_eq(warn_count, 3, "T40: unknown component constraint ignored")
+
+	w.free()
+
+
+# T41: create_with_components — one-call create + add components, with schema
+# default filling (absent fields become 0 / empty string / false / zeroed array).
+func _test_t41_create_with_components(t: RefCounted) -> void:
+	print("-- T41: create_with_components + schema defaults --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T41Stats", [
+		{"name": "hp", "type": "F32"},
+		{"name": "level", "type": "I32"},
+		{"name": "alive", "type": "Bool"},
+		{"name": "name", "type": "StringFixed", "count": 8},
+		{"name": "arr", "type": "F32", "count": 3},
+	])
+
+	# Auto-assigned id, partial fields -> missing fields take schema defaults.
+	var e: VECSEntity = w.create_with_components(0, {"T41Stats": {"hp": 10.0}})
+	t.expect(e != null, "T41: create_with_components auto id returns entity")
+	t.expect_eq(float(e.getf_float("T41Stats", "hp")), 10.0, "T41: provided field kept")
+	t.expect_eq(int(e.getf_int("T41Stats", "level")), 0, "T41: default int 0")
+	t.expect_eq(bool(e.getf_bool("T41Stats", "alive")), false, "T41: default bool false")
+	t.expect_eq(String(e.getf_string("T41Stats", "name")), "", "T41: default string empty")
+	var arr0: float = e.get_component("T41Stats").get_array_element("arr", 0)
+	var arr2: float = e.get_component("T41Stats").get_array_element("arr", 2)
+	t.expect_eq(arr0, 0.0, "T41: default array slot 0 zeroed")
+	t.expect_eq(arr2, 0.0, "T41: default array slot 2 zeroed")
+
+	# Preassigned def id.
+	var e2: VECSEntity = w.create_with_components(500, {"T41Stats": {"name": "orc"}})
+	t.expect(e2 != null, "T41: preassigned id returns entity")
+	t.expect_eq(int(e2.get_id()), 500, "T41: preassigned id preserved")
+	t.expect_eq(String(e2.getf_string("T41Stats", "name")), "orc", "T41: preassigned entity fields set")
+	t.expect_eq(float(e2.getf_float("T41Stats", "hp")), 0.0, "T41: preassigned defaults applied")
+
+	# Two components in one call.
+	var e3: VECSEntity = w.create_with_components(0, {"T41Stats": {"hp": 5.0}, "T41Stats2": {"x": 1}})
+	t.expect(e3 == null, "T41: unregistered component -> null handle")
+
+	# Id conflict -> null handle, no entity created.
+	var e4: VECSEntity = w.create_with_components(500, {"T41Stats": {"hp": 1.0}})
+	t.expect_eq(e4, null, "T41: id conflict -> null handle")
+	t.expect_eq(w.entity_count(), 2, "T41: no ghost entity after failures")
+
+	w.free()
+
+
+# T42: GDScript-usable observer. Since 0.3.1 VECSObserver is a concrete class
+# (GDREGISTER_CLASS), so VECSObserver.new() works directly; world.create_observer
+# and world.on_changed are one-call factories that wire a plain Callable.
+func _test_t42_gdscript_observer(t: RefCounted) -> void:
+	print("-- T42: GDScript observer (create_observer / on_changed) --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T42C", [{"name": "hp", "type": "F32"}, {"name": "mp", "type": "F32"}])
+	w.register_component("T42Other", [{"name": "x", "type": "I32"}])
+
+	# 1) world.on_changed with a field filter + callable.
+	var changed_events := []
+	var obs: VECSObserver = w.on_changed("T42C", {
+		"fields": ["hp"],
+		"callable": func(event: int, ent: VECSEntity, payload: Variant) -> void:
+			changed_events.append([event, ent.get_id()]),
+	})
+	t.expect(obs != null, "T42: on_changed returns an observer")
+	var e: VECSEntity = w.create_entity()
+	e.add_component("T42C", {"hp": 1.0, "mp": 0.0})  # ADDED, not CHANGED
+	t.expect_eq(changed_events.size(), 0, "T42: add_component does not fire CHANGED")
+	e.get_component("T42C").set_field("hp", 2.0)
+	t.expect_eq(changed_events.size(), 1, "T42: hp write fires CHANGED")
+	t.expect_eq(int(changed_events[0][0]), VECSObserver.Event.CHANGED, "T42: callback gets CHANGED event")
+	t.expect_eq(int(changed_events[0][1]), e.get_id(), "T42: callback gets the entity")
+	e.get_component("T42C").set_field("mp", 5.0)
+	t.expect_eq(changed_events.size(), 1, "T42: field filter suppresses mp write")
+	w.remove_observer(obs)
+	obs.free()
+
+	# 2) world.create_observer with an "added" event + component filter.
+	var added_events := []
+	var obs2: VECSObserver = w.create_observer(
+		func(event: int, ent: VECSEntity, payload: Variant) -> void:
+			added_events.append(event),
+		{"events": ["added"], "components": ["T42C"]})
+	var e2: VECSEntity = w.create_entity()
+	e2.add_component("T42C", {"hp": 1.0})
+	t.expect_eq(added_events.size(), 1, "T42: added event fires")
+	t.expect_eq(int(added_events[0]), VECSObserver.Event.ADDED, "T42: event is ADDED")
+	var e3: VECSEntity = w.create_entity()
+	e3.add_component("T42Other", {"x": 1})  # unregistered? no — must register first
+	t.expect_eq(added_events.size(), 1, "T42: component filter suppresses other components")
+	w.remove_observer(obs2)
+	obs2.free()
+
+	# 3) VECSObserver.new() + set_callback directly (no subclass).
+	var direct_events := []
+	var obs3: VECSObserver = VECSObserver.new()
+	obs3.set_callback(func(event: int, ent: VECSEntity, payload: Variant) -> void:
+		direct_events.append(event))
+	obs3.on_changed()
+	obs3.set_components(["T42C"])
+	obs3.set_fields(["mp"])
+	w.add_observer(obs3)
+	e.get_component("T42C").set_field("mp", 9.0)
+	t.expect_eq(direct_events.size(), 1, "T42: set_callback observer fires")
+	e.get_component("T42C").set_field("hp", 9.0)
+	t.expect_eq(direct_events.size(), 1, "T42: set_callback field filter works")
+	w.remove_observer(obs3)
+	obs3.free()
+
+	# 4) throttle_tick on on_changed.
+	var throttled := []
+	var obs4: VECSObserver = w.on_changed("T42C", {
+		"fields": ["hp"],
+		"throttle_tick": 10,
+		"callable": func(event: int, ent: VECSEntity, payload: Variant) -> void:
+			throttled.append(event),
+	})
+	for i in 5:
+		e.get_component("T42C").set_field("hp", float(i))
+	t.expect_eq(throttled.size(), 1, "T42: throttle suppresses 4 of 5 rapid writes")
+	for i in 10:
+		w.process(0.0, "")
+	e.get_component("T42C").set_field("hp", 99.0)
+	t.expect_eq(throttled.size(), 2, "T42: throttle expires after the window")
+	w.remove_observer(obs4)
+	obs4.free()
+
+	w.free()
