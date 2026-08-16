@@ -40,6 +40,7 @@ extends SceneTree
 #   T34 failed JSON snapshot load restores the live world instead of clearing it
 # 0.3.0 additions:
 #   T35 get_snapshot_data() remote-monitor snapshot structure
+#   T37 debug_set_field() runtime value write + validation (E8 remote monitor)
 # 0.4.0 additions:
 #   T36 hierarchical project settings (defaults, registration guard, verbose
 #       backward compatibility, default_sync_priority / default_throttle_tick /
@@ -83,6 +84,7 @@ func _initialize() -> void:
 	_test_t34_bad_snapshot_preserves_world(t)
 	_test_t35_snapshot_data(t)
 	_test_t36_settings(t)
+	_test_t37_debug_set_field(t)
 	print("total=", t.total, " failures=", t.failures)
 	if t.failures == 0:
 		print("=== VortarisECS Regression OK ===")
@@ -1135,3 +1137,69 @@ func _test_t36_settings(t: RefCounted) -> void:
 	t.expect_eq(bool(sw.deserialize_snapshot_json(compact)), true, "T36: compact JSON round-trips")
 	sw.free()
 	ProjectSettings.set_setting("vortarisecs/serialization/compact_json", false)
+
+
+# T37: debug_set_field() — the game side of the remote monitor's live value
+# editing (E8). Verifies the schema-driven write applies F32/I32/Bool/Vector3/
+# StringFixed, rejects a dead entity, an unknown component, an unknown field and
+# a component that is not attached, and that the applied value is observable
+# through getf().
+func _test_t37_debug_set_field(t: RefCounted) -> void:
+	print("-- T37: debug_set_field (E8 runtime value write) --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T37C", [
+		{"name": "hp", "type": "F32"},
+		{"name": "level", "type": "I32"},
+		{"name": "alive", "type": "Bool"},
+		{"name": "pos", "type": "Vector3"},
+		{"name": "title", "type": "StringFixed", "count": 16},
+	])
+	var e: VECSEntity = w.create_entity()
+	e.add_component("T37C", {"hp": 100.0, "level": 3, "alive": true, "pos": Vector3(1, 2, 3), "title": "hero"})
+
+	var r: Dictionary = w.debug_set_field(e.get_id(), "T37C", "hp", 50.0)
+	t.expect_eq(bool(r["ok"]), true, "T37: float write accepted")
+	t.expect_eq(String(r["error"]), "", "T37: no error on success")
+	t.expect_eq(float(e.getf("T37C", "hp")), 50.0, "T37: float value applied")
+
+	r = w.debug_set_field(e.get_id(), "T37C", "level", 7)
+	t.expect_eq(bool(r["ok"]), true, "T37: int write accepted")
+	t.expect_eq(int(e.getf("T37C", "level")), 7, "T37: int value applied")
+
+	r = w.debug_set_field(e.get_id(), "T37C", "alive", false)
+	t.expect_eq(bool(r["ok"]), true, "T37: bool write accepted")
+	t.expect_eq(bool(e.getf("T37C", "alive")), false, "T37: bool value applied")
+
+	r = w.debug_set_field(e.get_id(), "T37C", "pos", Vector3(9, 8, 7))
+	t.expect_eq(bool(r["ok"]), true, "T37: Vector3 write accepted")
+	t.expect_eq(Vector3(e.getf("T37C", "pos")), Vector3(9, 8, 7), "T37: Vector3 value applied")
+
+	r = w.debug_set_field(e.get_id(), "T37C", "title", "warlord")
+	t.expect_eq(bool(r["ok"]), true, "T37: StringFixed write accepted")
+	t.expect_eq(String(e.getf("T37C", "title")), "warlord", "T37: StringFixed value applied")
+
+	# --- validation failures ---
+	r = w.debug_set_field(-1, "T37C", "hp", 1.0)
+	t.expect_eq(bool(r["ok"]), false, "T37: non-positive id rejected")
+	t.expect(String(r["error"]).contains("invalid"), "T37: non-positive id error message")
+
+	var dead: VECSEntity = w.create_entity()
+	w.destroy_entity(dead)
+	r = w.debug_set_field(dead.get_id(), "T37C", "hp", 1.0)
+	t.expect_eq(bool(r["ok"]), false, "T37: dead entity rejected")
+	t.expect(String(r["error"]).contains("alive"), "T37: dead entity error message")
+
+	r = w.debug_set_field(e.get_id(), "T37Missing", "hp", 1.0)
+	t.expect_eq(bool(r["ok"]), false, "T37: unknown component rejected")
+	t.expect(String(r["error"]).contains("registered"), "T37: unknown component error message")
+
+	r = w.debug_set_field(e.get_id(), "T37C", "nope", 1.0)
+	t.expect_eq(bool(r["ok"]), false, "T37: unknown field rejected")
+	t.expect(String(r["error"]).contains("field"), "T37: unknown field error message")
+
+	var no_comp: VECSEntity = w.create_entity()
+	r = w.debug_set_field(no_comp.get_id(), "T37C", "hp", 1.0)
+	t.expect_eq(bool(r["ok"]), false, "T37: component-not-attached rejected")
+	t.expect(String(r["error"]).contains("carry"), "T37: component-not-attached error message")
+
+	w.free()

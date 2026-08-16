@@ -72,6 +72,28 @@ ECS world live, the same way Godot's scene tree Remote mode works — via an
   for the snapshot.
 - `plugin.cfg` version → `0.3.0`; README/README.zh-CN updated.
 
+### Remote monitor GUI fixes + live value editing (0.3.0 follow-up)
+
+- **X1** — `VECSWorld._debugger_capture` now returns `bool` (Godot's
+  `EngineDebugger::call_capture` requires a bool return); the CHANT
+  call-capture error spam is gone.
+- **X2** — the debugger tab root Control is named `ECS` (and child nodes get
+  meaningful names) instead of `@controlNNN`.
+- **X3** — the Entities page collapses field *values* by default (expands to
+  entity → component level only).
+- **X4** — `HSeparator` / `VSeparator` divide the toolbar, tables and status
+  areas for a cleaner layout.
+- **X5** — the Systems page now shows system names: an unnamed system falls back
+  to its GDScript resource basename or its native class name.
+- **X6** — auto-refresh now actually runs (the `Timer` was created but never
+  `start()`ed; only manual Refresh worked).
+- **X7** — the unsupported `%g` format specifiers were replaced with `%.1f`;
+  the CHANT "unsupported format character" errors are gone.
+- **E8** — live value editing: the Entities page's Value cells are editable and
+  writes are applied in the **running** game over a new `vecs:set_field`
+  channel, with an ok/error ack. New public API
+  `VECSWorld.debug_set_field()` (doc_class + regression T37).
+
 ## 0.2.1 (2026-08-15)
 
 Patch release focused on **debuggability**: an in-game runtime overlay, a
