@@ -12,12 +12,37 @@ extends Control
 ## from `vortarisecs/debug/auto_refresh_interval` (default ~1 Hz, Auto refresh).
 ## When no game is connected the tab shows a waiting hint. The Entities page
 ## caps the rendered rows at `vortarisecs/general/max_snapshot_entities`.
+##
+## UX conveniences (0.3.0):
+##   U1  Every tree defaults COLLAPSED (only the top level is shown; click a
+##       row to expand). Expanded/collapsed state survives refreshes and
+##       re-sorts: identities are keyed by entity id / component / field name,
+##       so a node the user opened stays open on the next snapshot. While a
+##       filter is active the shown rows are force-expanded so the matches are
+##       immediately visible; clearing the filter restores the pre-filter
+##       expansion state.
+##   U2  Clicking a column header sorts that page's top-level rows (ascending /
+##       descending toggle). Godot's Tree has no built-in header sort, so the
+##       raw snapshot data is kept around and re-sorted before re-populating.
+##       The active column shows a "↑"/"↓" glyph in its title.
+##   U3  Entities / Components / Systems each have a search LineEdit above the
+##       tree; typing filters immediately (text_changed), clearing restores all.
+##       Stats is intentionally kept filter-free.
 
 var plugin: EditorDebuggerPlugin = null
 var session_id: int = -1
 
 const DEFAULT_AUTO_REFRESH_INTERVAL := 1.0
 const DEFAULT_MAX_ENTITIES := 500
+
+const ENTITY_COLS := ["Entity ID", "Component", "Field", "Value"]
+const ENTITY_WIDTHS := [220, 120, 140, 200]
+const COMPONENT_COLS := ["Component", "Field", "Type", "Count", "Sync", "Net"]
+const COMPONENT_WIDTHS := [180, 120, 90, 60, 50, 50]
+const SYSTEM_COLS := ["Name", "Group", "Active", "Paused", "Interval", "Flush"]
+const SYSTEM_WIDTHS := [160, 110, 60, 60, 80, 60]
+const STAT_COLS := ["Stat", "Value"]
+const STAT_WIDTHS := [220, 160]
 
 var _auto_refresh_interval: float = DEFAULT_AUTO_REFRESH_INTERVAL
 var _max_entities: int = DEFAULT_MAX_ENTITIES
@@ -30,8 +55,45 @@ var _entities_tree: Tree
 var _components_tree: Tree
 var _systems_tree: Tree
 var _stats_tree: Tree
+var _entities_filter: LineEdit
+var _components_filter: LineEdit
+var _systems_filter: LineEdit
 var _auto_timer: Timer
 var _connected := false
+
+# Last snapshot payloads, kept so a header click (U2) or a search keystroke (U3)
+# can re-render without waiting for the next snapshot.
+var _last_stats: Variant = {}
+var _last_components: Variant = []
+var _last_systems: Variant = []
+var _last_entities: Variant = []
+
+# Per-page sort state: current column + ascending flag (U2).
+var _entities_sort_col := 0
+var _entities_sort_asc := true
+var _components_sort_col := 0
+var _components_sort_asc := true
+var _systems_sort_col := 0
+var _systems_sort_asc := true
+var _stats_sort_col := 0
+var _stats_sort_asc := true
+
+# Per-page search text (U3).
+var _entities_filter_text := ""
+var _components_filter_text := ""
+var _systems_filter_text := ""
+
+# Per-page preserved expansion state (U1). Only updated from a NON-filtered
+# render, so clearing a filter returns to exactly what the user had expanded
+# before they started filtering. `_*_force_expanded` remembers the last render
+# was filter-active (rows were force-expanded) so that state is never captured.
+var _entities_expanded := {}
+var _components_expanded := {}
+var _systems_expanded := {}
+var _stats_expanded := {}
+var _entities_force_expanded := false
+var _components_force_expanded := false
+var _systems_force_expanded := false
 
 
 func _ready() -> void:
@@ -90,10 +152,15 @@ func set_connected(connected: bool) -> void:
 func set_snapshot(snapshot: Dictionary) -> void:
 	if _entities_tree == null:
 		return
-	_populate_stats(snapshot.get("stats", {}))
-	_populate_components(snapshot.get("components", []))
-	_populate_systems(snapshot.get("systems", []))
-	_populate_entities(snapshot.get("entities", []))
+	# Keep the raw payloads so U2/U3 can re-render without a new snapshot.
+	_last_stats = snapshot.get("stats", {})
+	_last_components = snapshot.get("components", [])
+	_last_systems = snapshot.get("systems", [])
+	_last_entities = snapshot.get("entities", [])
+	_render_stats()
+	_render_components()
+	_render_systems()
+	_render_entities()
 
 
 # ---------------------------------------------------------------- UI build ----
@@ -150,21 +217,46 @@ func _build_ui() -> void:
 	_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(_tabs)
 
-	_entities_tree = _make_tree(["Entity ID", "Component", "Field", "Value"], [220, 120, 140, 200])
+	_entities_tree = _make_tree(ENTITY_COLS, ENTITY_WIDTHS)
 	_entities_tree.name = "EntitiesTree"
-	_tabs.add_child(_make_page("Entities", _entities_tree))
+	_entities_tree.column_title_clicked.connect(_on_column_title_clicked.bind("entities"))
+	_entities_filter = _make_search("Entities", "Filter by entity id or component…")
+	_entities_filter.text_changed.connect(_on_filter_changed.bind("entities"))
+	_tabs.add_child(_make_page("Entities", _entities_tree, _entities_filter))
 
-	_components_tree = _make_tree(["Component", "Field", "Type", "Count", "Sync", "Net"], [180, 120, 90, 60, 50, 50])
+	_components_tree = _make_tree(COMPONENT_COLS, COMPONENT_WIDTHS)
 	_components_tree.name = "ComponentsTree"
-	_tabs.add_child(_make_page("Components", _components_tree))
+	_components_tree.column_title_clicked.connect(_on_column_title_clicked.bind("components"))
+	_components_filter = _make_search("Components", "Filter by component name…")
+	_components_filter.text_changed.connect(_on_filter_changed.bind("components"))
+	_tabs.add_child(_make_page("Components", _components_tree, _components_filter))
 
-	_systems_tree = _make_tree(["Name", "Group", "Active", "Paused", "Interval", "Flush"], [160, 110, 60, 60, 80, 60])
+	_systems_tree = _make_tree(SYSTEM_COLS, SYSTEM_WIDTHS)
 	_systems_tree.name = "SystemsTree"
-	_tabs.add_child(_make_page("Systems", _systems_tree))
+	_systems_tree.column_title_clicked.connect(_on_column_title_clicked.bind("systems"))
+	_systems_filter = _make_search("Systems", "Filter by system name or group…")
+	_systems_filter.text_changed.connect(_on_filter_changed.bind("systems"))
+	_tabs.add_child(_make_page("Systems", _systems_tree, _systems_filter))
 
-	_stats_tree = _make_tree(["Stat", "Value"], [220, 160])
+	_stats_tree = _make_tree(STAT_COLS, STAT_WIDTHS)
 	_stats_tree.name = "StatsTree"
+	_stats_tree.column_title_clicked.connect(_on_column_title_clicked.bind("stats"))
 	_tabs.add_child(_make_page("Stats", _stats_tree))
+
+	# Reflect the default sort (column 0, ascending) in the header titles.
+	_refresh_column_titles(_entities_tree, ENTITY_COLS, _entities_sort_col, _entities_sort_asc)
+	_refresh_column_titles(_components_tree, COMPONENT_COLS, _components_sort_col, _components_sort_asc)
+	_refresh_column_titles(_systems_tree, SYSTEM_COLS, _systems_sort_col, _systems_sort_asc)
+	_refresh_column_titles(_stats_tree, STAT_COLS, _stats_sort_col, _stats_sort_asc)
+
+
+func _make_search(page_name: String, placeholder: String) -> LineEdit:
+	var search := LineEdit.new()
+	search.name = page_name + "Search"
+	search.placeholder_text = placeholder
+	search.clear_button_enabled = true
+	search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	return search
 
 
 func _make_tree(column_titles: Array, widths: Array) -> Tree:
@@ -181,15 +273,18 @@ func _make_tree(column_titles: Array, widths: Array) -> Tree:
 	return tree
 
 
-func _make_page(title: String, tree: Tree) -> Control:
+func _make_page(title: String, tree: Tree, search: LineEdit = null) -> Control:
 	var page := VBoxContainer.new()
 	page.name = title
 	page.add_theme_constant_override("separation", 4)
 	# Horizontal rule under the tab bar so each page reads as
-	# separator / table (matches the toolbar separator above the tabs).
+	# separator / search (optional) / table (matches the toolbar separator above
+	# the tabs).
 	var sep := HSeparator.new()
 	sep.name = "PageSeparator"
 	page.add_child(sep)
+	if search != null:
+		page.add_child(search)
 	var margin := MarginContainer.new()
 	margin.name = "TreeMargin"
 	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -202,93 +297,180 @@ func _make_page(title: String, tree: Tree) -> Control:
 	return page
 
 
-# ---------------------------------------------------------------- population ----
+# ---------------------------------------------------------------- rendering ----
+# Each _render_* function:
+#   1. preserves the user's expansion state (unless the previous render was
+#      force-expanded by an active filter — U1);
+#   2. filters the raw snapshot payload by the page's search text (U3);
+#   3. sorts the surviving rows by the page's sort column/direction (U2);
+#   4. re-populates the tree, tagging every row with an identity metadata so the
+#      expansion state survives the rebuild;
+#   5. re-applies collapse state (default collapsed, or force-expanded while a
+#      filter is active).
 
-func _populate_stats(stats: Variant) -> void:
+func _render_stats() -> void:
+	if _stats_tree == null:
+		return
+	_stats_expanded = _capture_expansion(_stats_tree)
 	_stats_tree.clear()
 	var root := _stats_tree.create_item()
+	var stats: Variant = _last_stats
 	if not (stats is Dictionary):
 		_placeholder_item(root, "no stats")
 		return
+	var pairs := []
 	for key in (stats as Dictionary).keys():
+		pairs.append({"k": str(key), "v": (stats as Dictionary)[key]})
+	_sort_data(pairs, _stats_sort_col, _stats_sort_asc, _stats_sort_key)
+	for p in pairs:
 		var item := _stats_tree.create_item(root)
-		item.set_text(0, str(key))
-		item.set_text(1, str((stats as Dictionary)[key]))
+		item.set_text(0, str(p["k"]))
+		item.set_text(1, str(p["v"]))
+		item.set_metadata(0, {"name": str(p["k"])})
+	_apply_collapse_state(_stats_tree, _stats_expanded, false)
 
 
-func _populate_components(components: Variant) -> void:
+func _render_components() -> void:
+	if _components_tree == null:
+		return
+	var filter := _components_filter_text.strip_edges().to_lower()
+	var filter_active := filter != ""
+	if not filter_active and not _components_force_expanded:
+		_components_expanded = _capture_expansion(_components_tree)
+	_components_force_expanded = filter_active
 	_components_tree.clear()
 	var root := _components_tree.create_item()
+	var components: Variant = _last_components
 	if not (components is Array) or (components as Array).size() == 0:
 		_placeholder_item(root, "no components registered")
 		return
+	var visible: Array = []
 	for cdata in components:
 		if not (cdata is Dictionary):
 			continue
+		if _component_matches(cdata, filter):
+			visible.append(cdata)
+	if visible.size() == 0:
+		_placeholder_item(root, "no components match filter")
+		return
+	_sort_data(visible, _components_sort_col, _components_sort_asc, _component_sort_key)
+	for cdata in visible:
+		var cname := str(cdata.get("name", "?"))
 		var item := _components_tree.create_item(root)
-		item.set_text(0, str(cdata.get("name", "?")))
+		item.set_text(0, cname)
+		item.set_metadata(0, {"comp": cname})
 		item.set_text(1, "size=%d" % int(cdata.get("size", 0)))
 		var fields: Variant = cdata.get("fields", [])
 		if fields is Array:
 			for fd in fields:
 				if not (fd is Dictionary):
 					continue
+				var fname := str(fd.get("name", ""))
 				var fitem := _components_tree.create_item(item)
-				fitem.set_text(1, str(fd.get("name", "")))
+				fitem.set_text(1, fname)
 				fitem.set_text(2, str(fd.get("type", "")))
 				fitem.set_text(3, str(fd.get("count", 1)))
 				fitem.set_text(4, str(fd.get("sync_priority", "")))
 				fitem.set_text(5, str(fd.get("networked", "")))
+				fitem.set_metadata(0, {"comp": cname, "field": fname})
+	_apply_collapse_state(_components_tree, _components_expanded, filter_active)
 
 
-func _populate_systems(systems: Variant) -> void:
+func _render_systems() -> void:
+	if _systems_tree == null:
+		return
+	var filter := _systems_filter_text.strip_edges().to_lower()
+	var filter_active := filter != ""
+	if not filter_active and not _systems_force_expanded:
+		_systems_expanded = _capture_expansion(_systems_tree)
+	_systems_force_expanded = filter_active
 	_systems_tree.clear()
 	var root := _systems_tree.create_item()
+	var systems: Variant = _last_systems
 	if not (systems is Array) or (systems as Array).size() == 0:
 		_placeholder_item(root, "no systems registered")
 		return
+	var visible: Array = []
 	for sdata in systems:
 		if not (sdata is Dictionary):
 			continue
+		if _system_matches(sdata, filter):
+			visible.append(sdata)
+	if visible.size() == 0:
+		_placeholder_item(root, "no systems match filter")
+		return
+	_sort_data(visible, _systems_sort_col, _systems_sort_asc, _system_sort_key)
+	for sdata in visible:
+		var sname := str(sdata.get("name", "?"))
 		var item := _systems_tree.create_item(root)
-		item.set_text(0, str(sdata.get("name", "?")))
+		item.set_text(0, sname)
+		item.set_metadata(0, {"name": sname})
 		item.set_text(1, str(sdata.get("group", "")))
 		item.set_text(2, "true" if bool(sdata.get("active", true)) else "false")
 		item.set_text(3, "true" if bool(sdata.get("paused", false)) else "false")
 		item.set_text(4, str(sdata.get("tick_interval", 0.0)))
 		item.set_text(5, str(sdata.get("flush_mode", 0)))
+	_apply_collapse_state(_systems_tree, _systems_expanded, filter_active)
 
 
-func _populate_entities(entities: Variant) -> void:
+func _render_entities() -> void:
+	if _entities_tree == null:
+		return
+	var filter := _entities_filter_text.strip_edges().to_lower()
+	var filter_active := filter != ""
+	if not filter_active and not _entities_force_expanded:
+		_entities_expanded = _capture_expansion(_entities_tree)
+	_entities_force_expanded = filter_active
 	_entities_tree.clear()
 	var root := _entities_tree.create_item()
+	var entities: Variant = _last_entities
 	if not (entities is Array) or (entities as Array).size() == 0:
 		_placeholder_item(root, "no entities")
 		return
-	var count := 0
-	var total: int = (entities as Array).size()
+	var visible: Array = []
 	for edata in entities:
-		if count >= _max_entities:
-			var note := _entities_tree.create_item(root)
-			note.set_text(0, "… %d more entities not shown (limit %d)" % [total - count, _max_entities])
-			break
 		if not (edata is Dictionary):
 			continue
+		if _entity_matches(edata, filter):
+			visible.append(edata)
+	if visible.size() == 0:
+		_placeholder_item(root, "no entities match filter")
+		return
+	_sort_data(visible, _entities_sort_col, _entities_sort_asc, _entity_sort_key)
+	var count := 0
+	var total := visible.size()
+	var note_shown := false
+	for edata in visible:
+		if count >= _max_entities:
+			if not note_shown:
+				var note := _entities_tree.create_item(root)
+				note.set_text(0, "… %d more entities not shown (limit %d)" % [total - count, _max_entities])
+				note_shown = true
+			break
 		count += 1
+		var eid := int(edata.get("id", 0))
+		var eid_text := "Entity #%d" % eid
+		# An id match shows the whole entity; a component-name match shows only
+		# the matching component subtree (so filtering stays tight).
+		var id_matches := (not filter_active) or eid_text.to_lower().contains(filter)
 		var eitem := _entities_tree.create_item(root)
-		eitem.set_text(0, "Entity #%d" % int(edata.get("id", 0)))
+		eitem.set_text(0, eid_text)
+		eitem.set_metadata(0, {"eid": eid})
 		var comps: Variant = edata.get("components", {})
 		if not (comps is Dictionary):
 			continue
 		for cname in comps:
+			if filter_active and not id_matches and not str(cname).to_lower().contains(filter):
+				continue
 			var citem := _entities_tree.create_item(eitem)
 			citem.set_text(1, str(cname))
+			citem.set_metadata(0, {"eid": eid, "comp": str(cname)})
 			var fields: Variant = (comps as Dictionary)[cname]
 			if fields is Dictionary:
 				for fname in fields:
+					var raw_value: Variant = (fields as Dictionary)[fname]
 					var fitem := _entities_tree.create_item(citem)
 					fitem.set_text(2, str(fname))
-					var raw_value: Variant = (fields as Dictionary)[fname]
 					fitem.set_text(3, str(raw_value))
 					# Runtime-debug editing (E8): the Value cell is editable and
 					# carries the original Variant + addressing metadata, so the
@@ -296,15 +478,12 @@ func _populate_entities(entities: Variant) -> void:
 					# before it is sent to the running game.
 					fitem.set_editable(3, true)
 					fitem.set_metadata(0, {
-						"eid": int(edata.get("id", 0)),
+						"eid": eid,
 						"comp": str(cname),
 						"field": str(fname),
 						"value": raw_value,
 					})
-					# Field VALUES default collapsed: the page then reads as
-					# entity -> component -> (folded fields), which stays
-					# navigable even with hundreds of entities.
-					fitem.collapsed = true
+	_apply_collapse_state(_entities_tree, _entities_expanded, filter_active)
 
 
 func _placeholder_item(root: TreeItem, text: String) -> void:
@@ -321,6 +500,266 @@ func _show_waiting() -> void:
 	_placeholder_item(_systems_tree.create_item(), "—")
 	_stats_tree.clear()
 	_placeholder_item(_stats_tree.create_item(), "—")
+
+
+# ------------------------------------------------------ U1 collapse helpers ----
+# Expansion state is keyed by row identity (entity id / component / field), so
+# it survives the full rebuild on every refresh, sort and filter change.
+
+func _capture_expansion(tree: Tree) -> Dictionary:
+	var expanded := {}
+	var root := tree.get_root()
+	if root == null:
+		return expanded
+	for child in root.get_children():
+		_collect_expansion(child, expanded)
+	return expanded
+
+
+func _collect_expansion(item: TreeItem, expanded: Dictionary) -> void:
+	if not item.collapsed:
+		expanded[_item_identity(item)] = true
+	for child in item.get_children():
+		_collect_expansion(child, expanded)
+
+
+func _apply_collapse_state(tree: Tree, expanded: Dictionary, force_expand: bool) -> void:
+	var root := tree.get_root()
+	if root == null:
+		return
+	for child in root.get_children():
+		_set_collapse(child, expanded, force_expand)
+
+
+func _set_collapse(item: TreeItem, expanded: Dictionary, force_expand: bool) -> void:
+	if force_expand:
+		item.collapsed = false
+	else:
+		# Default is collapsed (U1); only rows the user expanded stay open.
+		item.collapsed = not expanded.has(_item_identity(item))
+	for child in item.get_children():
+		_set_collapse(child, expanded, force_expand)
+
+
+## Stable identity of a row across rebuilds. Rows carry a Dictionary in
+## metadata(0) with the addressing keys; anything else falls back to text(0).
+func _item_identity(item: TreeItem) -> String:
+	var meta: Variant = item.get_metadata(0)
+	if meta is Dictionary:
+		var d: Dictionary = meta
+		if d.has("eid") and d.has("comp") and d.has("field"):
+			return "e%d/c%s/f%s" % [int(d["eid"]), str(d["comp"]), str(d["field"])]
+		if d.has("eid") and d.has("comp"):
+			return "e%d/c%s" % [int(d["eid"]), str(d["comp"])]
+		if d.has("eid"):
+			return "e%d" % int(d["eid"])
+		if d.has("comp") and d.has("field"):
+			return "c%s/f%s" % [str(d["comp"]), str(d["field"])]
+		if d.has("comp"):
+			return "c%s" % str(d["comp"])
+		if d.has("name"):
+			return "n%s" % str(d["name"])
+	return "t%s" % item.get_text(0)
+
+
+# ------------------------------------------------------- U2 sorting helpers ----
+# Godot's Tree has no built-in header sort; we sort the raw rows ourselves and
+# re-populate. Sorting applies to each page's top-level rows.
+
+func _on_column_title_clicked(col: int, page: String) -> void:
+	match page:
+		"entities":
+			var cyc := _cycle_sort(_entities_sort_col, _entities_sort_asc, col)
+			_entities_sort_col = cyc[0]
+			_entities_sort_asc = cyc[1]
+			_refresh_column_titles(_entities_tree, ENTITY_COLS, _entities_sort_col, _entities_sort_asc)
+			_render_entities()
+		"components":
+			var cyc := _cycle_sort(_components_sort_col, _components_sort_asc, col)
+			_components_sort_col = cyc[0]
+			_components_sort_asc = cyc[1]
+			_refresh_column_titles(_components_tree, COMPONENT_COLS, _components_sort_col, _components_sort_asc)
+			_render_components()
+		"systems":
+			var cyc := _cycle_sort(_systems_sort_col, _systems_sort_asc, col)
+			_systems_sort_col = cyc[0]
+			_systems_sort_asc = cyc[1]
+			_refresh_column_titles(_systems_tree, SYSTEM_COLS, _systems_sort_col, _systems_sort_asc)
+			_render_systems()
+		"stats":
+			var cyc := _cycle_sort(_stats_sort_col, _stats_sort_asc, col)
+			_stats_sort_col = cyc[0]
+			_stats_sort_asc = cyc[1]
+			_refresh_column_titles(_stats_tree, STAT_COLS, _stats_sort_col, _stats_sort_asc)
+			_render_stats()
+
+
+func _cycle_sort(cur_col: int, cur_asc: bool, col: int) -> Array:
+	if col == cur_col:
+		return [col, not cur_asc]
+	return [col, true]
+
+
+func _refresh_column_titles(tree: Tree, titles: Array, sort_col: int, sort_asc: bool) -> void:
+	for i in titles.size():
+		var t: String = titles[i]
+		if i == sort_col:
+			t += " ↑" if sort_asc else " ↓"
+		tree.set_column_title(i, t)
+
+
+## Re-sorts `data` (mutated in place) by the given column via `key_func`.
+## `key_func.call(row, col)` returns the sort key for that row. Ties keep the
+## original relative order (stable), so repeated clicks don't jitter.
+func _sort_data(data: Array, col: int, ascending: bool, key_func: Callable) -> void:
+	if data.size() < 2:
+		return
+	var rows := []
+	for i in data.size():
+		rows.append({"i": i, "k": key_func.call(data[i], col)})
+	rows.sort_custom(_sort_rows.bind(ascending))
+	var original := data.duplicate()
+	for i in rows.size():
+		data[i] = original[int(rows[i]["i"])]
+
+
+func _sort_rows(a: Dictionary, b: Dictionary, ascending: bool) -> bool:
+	if ascending:
+		if _sort_less(a["k"], b["k"]):
+			return true
+		if _sort_less(b["k"], a["k"]):
+			return false
+	else:
+		if _sort_less(b["k"], a["k"]):
+			return true
+		if _sort_less(a["k"], b["k"]):
+			return false
+	return int(a["i"]) < int(b["i"])
+
+
+## Numeric-aware comparison: numbers (and numeric strings / bools) compare
+## numerically, everything else lexicographically.
+func _sort_less(a: Variant, b: Variant) -> bool:
+	var an := _to_sort_number(a)
+	var bn := _to_sort_number(b)
+	if an != null and bn != null:
+		return an < bn
+	return str(a) < str(b)
+
+
+func _to_sort_number(v: Variant) -> Variant:
+	match typeof(v):
+		TYPE_INT:
+			return float(v)
+		TYPE_FLOAT:
+			return v
+		TYPE_BOOL:
+			return 1.0 if v else 0.0
+		TYPE_STRING:
+			var s: String = (v as String).strip_edges()
+			if s.is_valid_float():
+				return float(s)
+			return null
+	return null
+
+
+# Per-page sort keys. The Entities page's columns 1/2 are child-level in the
+# tree, so at the top level they sort by aggregate counts (components / fields)
+# and column 3 (Value) falls back to the entity id.
+func _entity_sort_key(edata: Dictionary, col: int) -> Variant:
+	match col:
+		0:
+			return int(edata.get("id", 0))
+		1:
+			var comps: Variant = edata.get("components", {})
+			return (comps as Dictionary).size() if comps is Dictionary else 0
+		2:
+			var comps: Variant = edata.get("components", {})
+			var n := 0
+			if comps is Dictionary:
+				for cname in comps:
+					var fields: Variant = (comps as Dictionary)[cname]
+					if fields is Dictionary:
+						n += (fields as Dictionary).size()
+			return n
+		_:
+			return int(edata.get("id", 0))
+
+
+func _component_sort_key(cdata: Dictionary, col: int) -> Variant:
+	match col:
+		0:
+			return str(cdata.get("name", ""))
+		1:
+			return int(cdata.get("size", 0))
+		_:
+			return str(cdata.get("name", ""))
+
+
+func _system_sort_key(sdata: Dictionary, col: int) -> Variant:
+	match col:
+		0:
+			return str(sdata.get("name", ""))
+		1:
+			return str(sdata.get("group", ""))
+		2:
+			return bool(sdata.get("active", true))
+		3:
+			return bool(sdata.get("paused", false))
+		4:
+			return float(sdata.get("tick_interval", 0.0))
+		5:
+			return int(sdata.get("flush_mode", 0))
+		_:
+			return str(sdata.get("name", ""))
+
+
+func _stats_sort_key(pair: Dictionary, col: int) -> Variant:
+	return pair["k"] if col == 0 else pair["v"]
+
+
+# ------------------------------------------------------- U3 filter helpers ----
+# Each page stores its search text in `_*_filter_text`; the matching helpers
+# below run at render time so filtering takes effect immediately on keystroke.
+
+func _on_filter_changed(text: String, page: String) -> void:
+	match page:
+		"entities":
+			_entities_filter_text = text
+			_render_entities()
+		"components":
+			_components_filter_text = text
+			_render_components()
+		"systems":
+			_systems_filter_text = text
+			_render_systems()
+
+
+func _entity_matches(edata: Dictionary, filter: String) -> bool:
+	if filter == "":
+		return true
+	var eid := int(edata.get("id", 0))
+	if ("entity #%d" % eid).contains(filter):
+		return true
+	var comps: Variant = edata.get("components", {})
+	if comps is Dictionary:
+		for cname in comps:
+			if str(cname).to_lower().contains(filter):
+				return true
+	return false
+
+
+func _component_matches(cdata: Dictionary, filter: String) -> bool:
+	if filter == "":
+		return true
+	return str(cdata.get("name", "")).to_lower().contains(filter)
+
+
+func _system_matches(sdata: Dictionary, filter: String) -> bool:
+	if filter == "":
+		return true
+	return str(sdata.get("name", "")).to_lower().contains(filter) \
+			or str(sdata.get("group", "")).to_lower().contains(filter)
 
 
 # ---------------------------------------------------------------- live editing ----

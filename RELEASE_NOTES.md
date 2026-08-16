@@ -94,6 +94,18 @@ ECS world live, the same way Godot's scene tree Remote mode works — via an
   channel, with an ok/error ack. New public API
   `VECSWorld.debug_set_field()` (doc_class + regression T37).
 
+### Remote monitor GUI UX (0.3.0 follow-up)
+
+- **U1** — all four pages' trees now default fully collapsed (Entities used to
+  fold only field values). Expanded rows stay expanded across refreshes and
+  re-sorts, and clearing a search box returns to the pre-search expansion
+  state.
+- **U2** — clicking a column header sorts that page's rows (ascending /
+  descending toggle; the active column shows a ↑/↓ glyph in its title).
+- **U3** — Entities / Components / Systems pages gained a live search box
+  (entity id or component name / component name / system name or group);
+  Stats is intentionally filter-free.
+
 ## 0.2.1 (2026-08-15)
 
 Patch release focused on **debuggability**: an in-game runtime overlay, a
