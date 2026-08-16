@@ -1161,6 +1161,13 @@ func _test_t37_debug_set_field(t: RefCounted) -> void:
 	t.expect_eq(bool(r["ok"]), true, "T37: float write accepted")
 	t.expect_eq(String(r["error"]), "", "T37: no error on success")
 	t.expect_eq(float(e.getf("T37C", "hp")), 50.0, "T37: float value applied")
+	# W2: the remote monitor's ack-triggered refresh re-reads the live world, so
+	# a snapshot taken after the edit must carry the new value (not the old one).
+	var snap_hp := -1.0
+	for sd in w.entities_to_data():
+		if int(sd["id"]) == e.get_id():
+			snap_hp = float((sd["components"] as Dictionary)["T37C"]["hp"])
+	t.expect_eq(snap_hp, 50.0, "T37: snapshot reflects debug_set_field write")
 
 	r = w.debug_set_field(e.get_id(), "T37C", "level", 7)
 	t.expect_eq(bool(r["ok"]), true, "T37: int write accepted")

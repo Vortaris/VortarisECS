@@ -28,6 +28,13 @@ extends Control
 ##   U3  Entities / Components / Systems each have a search LineEdit above the
 ##       tree; typing filters immediately (text_changed), clearing restores all.
 ##       Stats is intentionally kept filter-free.
+##   W3  Entities page has a "Filter…" button that opens a component picker
+##       (checkboxes from the snapshot's registered components) plus an All/Any
+##       mode. The chosen component set is AND/OR-ed with the text search and
+##       survives refresh/sort. A summary label + Clear button sit in the bar.
+##   W4  The Entities search box has a mode dropdown: Mixed (id+component+value
+##       substring), By value (field values, supports "comp/field == value"),
+##       By component (names only) and Fuzzy (loose subsequence matching).
 
 var plugin: EditorDebuggerPlugin = null
 var session_id: int = -1
@@ -68,6 +75,13 @@ var _last_components: Variant = []
 var _last_systems: Variant = []
 var _last_entities: Variant = []
 
+# E8 live edits that the game has not yet acked (W2). Keyed by
+# "<eid>/<comp>/<field>" -> coerced Variant. Overlaid onto every incoming
+# snapshot AND onto the local cache, so a re-render that fires between the edit
+# and the confirming snapshot (auto-refresh tick, sort, filter) never rolls a
+# just-edited cell back to the pre-edit value.
+var _pending_edits := {}
+
 # Per-page sort state: current column + ascending flag (U2).
 var _entities_sort_col := 0
 var _entities_sort_asc := true
@@ -82,6 +96,23 @@ var _stats_sort_asc := true
 var _entities_filter_text := ""
 var _components_filter_text := ""
 var _systems_filter_text := ""
+
+# Entities-page search mode (W4): "mixed" | "value" | "component" | "fuzzy".
+var _search_mode := "mixed"
+var _entities_mode: OptionButton
+
+# Entities-page component/archetype filter (W3): selected component names and
+# the All/Any mode. "No selection = no filter". The filter window and its bar
+# are built lazily in _make_entities_page()/dialog helpers.
+var _entities_comp_filter := {}
+var _entities_comp_filter_any := false
+var _entities_filter_button: Button
+var _entities_filter_summary: Label
+var _entities_clear_filter_button: Button
+var _comp_filter_dialog: AcceptDialog
+var _comp_filter_box: VBoxContainer
+var _comp_filter_option: OptionButton
+var _comp_filter_checks := {}
 
 # Per-page preserved expansion state (U1). Only updated from a NON-filtered
 # render, so clearing a filter returns to exactly what the user had expanded
@@ -157,6 +188,10 @@ func set_snapshot(snapshot: Dictionary) -> void:
 	_last_components = snapshot.get("components", [])
 	_last_systems = snapshot.get("systems", [])
 	_last_entities = snapshot.get("entities", [])
+	# A snapshot may have been computed before the game processed an in-flight
+	# E8 edit (auto-refresh race). Re-apply unacked edits so a stale snapshot
+	# does not roll the just-edited cell back to its pre-edit value (W2).
+	_overlay_pending_edits()
 	_render_stats()
 	_render_components()
 	_render_systems()
@@ -222,7 +257,7 @@ func _build_ui() -> void:
 	_entities_tree.column_title_clicked.connect(_on_column_title_clicked.bind("entities"))
 	_entities_filter = _make_search("Entities", "Filter by entity id or component…")
 	_entities_filter.text_changed.connect(_on_filter_changed.bind("entities"))
-	_tabs.add_child(_make_page("Entities", _entities_tree, _entities_filter))
+	_tabs.add_child(_make_entities_page())
 
 	_components_tree = _make_tree(COMPONENT_COLS, COMPONENT_WIDTHS)
 	_components_tree.name = "ComponentsTree"
@@ -294,6 +329,71 @@ func _make_page(title: String, tree: Tree, search: LineEdit = null) -> Control:
 	margin.add_theme_constant_override("margin_bottom", 4)
 	margin.add_child(tree)
 	page.add_child(margin)
+	return page
+
+
+## Entities page layout: separator / component-filter bar / search / table (W3).
+## The extra bar holds the Filter… button (opens the component picker), a live
+## summary of the active selection, and a Clear button.
+func _make_entities_page() -> Control:
+	var page := VBoxContainer.new()
+	page.name = "Entities"
+	page.add_theme_constant_override("separation", 4)
+	var sep := HSeparator.new()
+	sep.name = "PageSeparator"
+	page.add_child(sep)
+
+	var bar := HBoxContainer.new()
+	bar.name = "ComponentFilterBar"
+	bar.add_theme_constant_override("separation", 8)
+	_entities_filter_button = Button.new()
+	_entities_filter_button.name = "ComponentFilterButton"
+	_entities_filter_button.text = "Filter…"
+	_entities_filter_button.tooltip_text = "Show only entities that carry the selected components."
+	_entities_filter_button.pressed.connect(_open_comp_filter_dialog)
+	bar.add_child(_entities_filter_button)
+	_entities_filter_summary = Label.new()
+	_entities_filter_summary.name = "ComponentFilterSummary"
+	bar.add_child(_entities_filter_summary)
+	var spacer := Control.new()
+	spacer.name = "ComponentFilterSpacer"
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.add_child(spacer)
+	_entities_clear_filter_button = Button.new()
+	_entities_clear_filter_button.name = "ClearComponentFilterButton"
+	_entities_clear_filter_button.text = "Clear"
+	_entities_clear_filter_button.tooltip_text = "Clear the component filter and show all entities."
+	_entities_clear_filter_button.pressed.connect(_on_clear_comp_filter)
+	bar.add_child(_entities_clear_filter_button)
+	page.add_child(bar)
+
+	# Search mode dropdown (W4) sits beside the search box.
+	var search_bar := HBoxContainer.new()
+	search_bar.name = "SearchBar"
+	search_bar.add_theme_constant_override("separation", 6)
+	_entities_mode = OptionButton.new()
+	_entities_mode.name = "SearchModeOption"
+	_entities_mode.add_item("Mixed", 0)
+	_entities_mode.add_item("By value", 1)
+	_entities_mode.add_item("By component", 2)
+	_entities_mode.add_item("Fuzzy", 3)
+	_entities_mode.select(0)
+	_entities_mode.item_selected.connect(_on_search_mode_changed)
+	_entities_mode.tooltip_text = "Search mode: Mixed (id+component+value), By value (fields, supports 'comp/field == value'), By component (names only), Fuzzy (loose)."
+	search_bar.add_child(_entities_mode)
+	_entities_filter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	search_bar.add_child(_entities_filter)
+	page.add_child(search_bar)
+	var margin := MarginContainer.new()
+	margin.name = "TreeMargin"
+	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin.add_theme_constant_override("margin_left", 4)
+	margin.add_theme_constant_override("margin_right", 4)
+	margin.add_theme_constant_override("margin_top", 4)
+	margin.add_theme_constant_override("margin_bottom", 4)
+	margin.add_child(_entities_tree)
+	page.add_child(margin)
+	_refresh_comp_filter_summary()
 	return page
 
 
@@ -431,7 +531,7 @@ func _render_entities() -> void:
 	for edata in entities:
 		if not (edata is Dictionary):
 			continue
-		if _entity_matches(edata, filter):
+		if _entity_matches(edata, filter) and _entity_passes_comp_filter(edata):
 			visible.append(edata)
 	if visible.size() == 0:
 		_placeholder_item(root, "no entities match filter")
@@ -450,8 +550,9 @@ func _render_entities() -> void:
 		count += 1
 		var eid := int(edata.get("id", 0))
 		var eid_text := "Entity #%d" % eid
-		# An id match shows the whole entity; a component-name match shows only
-		# the matching component subtree (so filtering stays tight).
+		# An id match shows the whole entity; otherwise only the matching
+		# component subtree(s) are shown (so filtering stays tight). "By value"
+		# narrows further to the exact matching fields (W4).
 		var id_matches := (not filter_active) or eid_text.to_lower().contains(filter)
 		var eitem := _entities_tree.create_item(root)
 		eitem.set_text(0, eid_text)
@@ -460,7 +561,7 @@ func _render_entities() -> void:
 		if not (comps is Dictionary):
 			continue
 		for cname in comps:
-			if filter_active and not id_matches and not str(cname).to_lower().contains(filter):
+			if filter_active and not id_matches and not _comp_shows_match(edata, str(cname), filter):
 				continue
 			var citem := _entities_tree.create_item(eitem)
 			citem.set_text(1, str(cname))
@@ -469,6 +570,8 @@ func _render_entities() -> void:
 			if fields is Dictionary:
 				for fname in fields:
 					var raw_value: Variant = (fields as Dictionary)[fname]
+					if filter_active and not id_matches and not _field_shows_match(str(cname), str(fname), raw_value, filter):
+						continue
 					var fitem := _entities_tree.create_item(citem)
 					fitem.set_text(2, str(fname))
 					fitem.set_text(3, str(raw_value))
@@ -566,7 +669,7 @@ func _item_identity(item: TreeItem) -> String:
 # Godot's Tree has no built-in header sort; we sort the raw rows ourselves and
 # re-populate. Sorting applies to each page's top-level rows.
 
-func _on_column_title_clicked(col: int, page: String) -> void:
+func _on_column_title_clicked(col: int, _mouse_button_index: int, page: String) -> void:
 	match page:
 		"entities":
 			var cyc := _cycle_sort(_entities_sort_col, _entities_sort_asc, col)
@@ -735,9 +838,38 @@ func _on_filter_changed(text: String, page: String) -> void:
 			_render_systems()
 
 
+func _on_search_mode_changed(index: int) -> void:
+	match index:
+		0:
+			_search_mode = "mixed"
+		1:
+			_search_mode = "value"
+		2:
+			_search_mode = "component"
+		3:
+			_search_mode = "fuzzy"
+	_render_entities()
+
+
+## Entity-level visibility for the active search mode (W4). `filter` is already
+## lower-cased by the caller. Mixed searches id + component name + field value;
+## By value searches field values (with `comp/field == value` support); By
+## component searches component names only; Fuzzy adds loose subsequence matching.
 func _entity_matches(edata: Dictionary, filter: String) -> bool:
 	if filter == "":
 		return true
+	match _search_mode:
+		"component":
+			return _entity_has_comp_name_match(edata, filter)
+		"value":
+			return _entity_has_value_match(edata, filter)
+		"fuzzy":
+			return _entity_mixed_match(edata, filter) or _entity_fuzzy_match(edata, filter)
+		_:
+			return _entity_mixed_match(edata, filter)
+
+
+func _entity_mixed_match(edata: Dictionary, filter: String) -> bool:
 	var eid := int(edata.get("id", 0))
 	if ("entity #%d" % eid).contains(filter):
 		return true
@@ -746,7 +878,137 @@ func _entity_matches(edata: Dictionary, filter: String) -> bool:
 		for cname in comps:
 			if str(cname).to_lower().contains(filter):
 				return true
+			var fields: Variant = (comps as Dictionary)[cname]
+			if fields is Dictionary:
+				for fname in fields:
+					if str((fields as Dictionary)[fname]).to_lower().contains(filter):
+						return true
 	return false
+
+
+func _entity_has_comp_name_match(edata: Dictionary, filter: String) -> bool:
+	var comps: Variant = edata.get("components", {})
+	if comps is Dictionary:
+		for cname in comps:
+			if str(cname).to_lower().contains(filter):
+				return true
+	return false
+
+
+func _entity_has_value_match(edata: Dictionary, filter: String) -> bool:
+	var q := _parse_value_query(filter)
+	var comps: Variant = edata.get("components", {})
+	if comps is Dictionary:
+		for cname in comps:
+			if q["comp"] != "" and q["comp"] != str(cname).to_lower():
+				continue
+			var fields: Variant = (comps as Dictionary)[cname]
+			if fields is Dictionary:
+				for fname in fields:
+					if q["field"] != "" and q["field"] != str(fname).to_lower():
+						continue
+					if str((fields as Dictionary)[fname]).to_lower().contains(q["value"]):
+						return true
+	return false
+
+
+func _entity_fuzzy_match(edata: Dictionary, filter: String) -> bool:
+	# Loose fallback: the filter appears as a (case-insensitive) subsequence of
+	# the entity's id + component names + field names + field values.
+	var hay := "entity #%d" % int(edata.get("id", 0))
+	var comps: Variant = edata.get("components", {})
+	if comps is Dictionary:
+		for cname in comps:
+			hay += " " + str(cname).to_lower()
+			var fields: Variant = (comps as Dictionary)[cname]
+			if fields is Dictionary:
+				for fname in fields:
+					hay += " " + str(fname).to_lower() + " " + str((fields as Dictionary)[fname]).to_lower()
+	return _is_subsequence(filter, hay)
+
+
+func _is_subsequence(needle: String, haystack: String) -> bool:
+	if needle.is_empty():
+		return true
+	var n := 0
+	for i in haystack.length():
+		if haystack[i] == needle[n]:
+			n += 1
+			if n == needle.length():
+				return true
+	return false
+
+
+## Parses a By-value query: "comp/field == value", "field == value", or a bare
+## value. Returns { "comp", "field", "value" } with "" meaning "any".
+func _parse_value_query(text: String) -> Dictionary:
+	var out := {"comp": "", "field": "", "value": text}
+	var eq := text.find("==")
+	if eq == -1:
+		return out
+	var lhs := text.substr(0, eq).strip_edges().to_lower()
+	var rhs := text.substr(eq + 2).strip_edges().to_lower()
+	var slash := lhs.find("/")
+	if slash != -1:
+		out["comp"] = lhs.substr(0, slash).strip_edges()
+		out["field"] = lhs.substr(slash + 1).strip_edges()
+	else:
+		out["field"] = lhs
+	out["value"] = rhs
+	return out
+
+
+## Should the component `cname` subtree of `edata` be shown when the search is
+## active and the entity id did not match? (W4)
+func _comp_shows_match(edata: Dictionary, cname: String, filter: String) -> bool:
+	match _search_mode:
+		"component":
+			return cname.to_lower().contains(filter)
+		"value":
+			return _comp_has_matching_field(edata, cname, filter)
+		_:
+			# mixed / fuzzy: component name or any field value matches
+			if cname.to_lower().contains(filter):
+				return true
+			var comps: Variant = edata.get("components", {})
+			if comps is Dictionary and (comps as Dictionary).has(cname):
+				var fields: Variant = (comps as Dictionary)[cname]
+				if fields is Dictionary:
+					for fname in fields:
+						if str((fields as Dictionary)[fname]).to_lower().contains(filter):
+							return true
+			return false
+
+
+func _comp_has_matching_field(edata: Dictionary, cname: String, filter: String) -> bool:
+	var q := _parse_value_query(filter)
+	if q["comp"] != "" and q["comp"] != cname.to_lower():
+		return false
+	var comps: Variant = edata.get("components", {})
+	if comps is Dictionary and (comps as Dictionary).has(cname):
+		var fields: Variant = (comps as Dictionary)[cname]
+		if fields is Dictionary:
+			for fname in fields:
+				if _field_value_matches(cname, str(fname), (fields as Dictionary)[fname], q):
+					return true
+	return false
+
+
+## Should the field row be shown when narrowing is active? Only By-value mode
+## narrows to the exact matching fields; the other modes show the whole comp
+## subtree once the comp itself matched.
+func _field_shows_match(cname: String, fname: String, raw_value: Variant, filter: String) -> bool:
+	if _search_mode == "value":
+		return _field_value_matches(cname, fname, raw_value, _parse_value_query(filter))
+	return true
+
+
+func _field_value_matches(cname: String, fname: String, raw_value: Variant, q: Dictionary) -> bool:
+	if q["comp"] != "" and q["comp"] != cname.to_lower():
+		return false
+	if q["field"] != "" and q["field"] != fname.to_lower():
+		return false
+	return str(raw_value).to_lower().contains(q["value"])
 
 
 func _component_matches(cdata: Dictionary, filter: String) -> bool:
@@ -779,6 +1041,15 @@ func _on_entity_field_edited() -> void:
 	var value := _coerce_field_value(original, item.get_text(col))
 	if value == original:
 		return  # unparsable / unchanged — keep the last known good text
+	# W2: keep this edit in flight locally so a re-render that arrives before the
+	# confirming snapshot (auto-refresh tick, sort, filter) shows the new value
+	# instead of rolling the cell back to the pre-edit snapshot value.
+	_pending_edits["%d/%s/%s" % [eid, comp, field]] = value
+	_overlay_pending_edits()
+	# Keep the row's own metadata in sync so a follow-up edit coerces against the
+	# value the user actually set, not the stale pre-edit snapshot value.
+	meta["value"] = value
+	item.set_metadata(0, meta)
 	_send_set_field(eid, comp, field, value)
 
 
@@ -791,13 +1062,18 @@ func _send_set_field(entity_id: int, comp: String, field: String, value: Variant
 
 
 func set_field_result(ok: bool, entity_id: int, comp: String, field: String, error: String) -> void:
+	# The game answered; the write is settled. Stop overlaying this edit so the
+	# next snapshot (which now carries the real value) is rendered as-is.
+	_pending_edits.erase("%d/%s/%s" % [entity_id, comp, field])
 	if ok:
 		_status_label.text = "Set %s.%s on #%d — applied" % [comp, field, entity_id]
 		_status_label.add_theme_color_override("font_color", Color(0.45, 0.9, 0.45))
-		_request_snapshot()
 	else:
 		_status_label.text = "Set %s.%s on #%d failed: %s" % [comp, field, entity_id, error]
 		_status_label.add_theme_color_override("font_color", Color(0.9, 0.5, 0.4))
+	# Refresh on success (confirm) AND on failure (the optimistic value may not
+	# have been written, so pull the world's real value back into the cell).
+	_request_snapshot()
 
 
 ## Parses the text a user typed into a Value cell back into the Variant type of
@@ -875,6 +1151,148 @@ func _split_ints(text: String, count: int) -> PackedInt64Array:
 	if out.size() == count:
 		return out
 	return PackedInt64Array()
+
+
+## Re-applies every unacked E8 edit onto `_last_entities` in place. Called after
+## an edit is recorded (so the local cache reflects the new value immediately)
+## and after every incoming snapshot (so a stale pre-edit snapshot does not roll
+## the cell back). O(#entities) — cheap next to the snapshot walk itself (W2).
+func _overlay_pending_edits() -> void:
+	if _pending_edits.is_empty():
+		return
+	var entities: Variant = _last_entities
+	if not (entities is Array):
+		return
+	for edata in entities:
+		if not (edata is Dictionary):
+			continue
+		var eid := int(edata.get("id", 0))
+		var comps: Variant = edata.get("components", {})
+		if not (comps is Dictionary):
+			continue
+		for cname in comps:
+			var fields: Variant = (comps as Dictionary)[cname]
+			if not (fields is Dictionary):
+				continue
+			for fname in fields:
+				var key := "%d/%s/%s" % [eid, str(cname), str(fname)]
+				if _pending_edits.has(key):
+					(fields as Dictionary)[fname] = _pending_edits[key]
+
+
+# ------------------------------------------------------- W3 component filter ----
+
+func _open_comp_filter_dialog() -> void:
+	if _comp_filter_dialog == null:
+		_comp_filter_dialog = AcceptDialog.new()
+		_comp_filter_dialog.name = "ComponentFilterDialog"
+		_comp_filter_dialog.title = "Filter Entities by Component"
+		_comp_filter_dialog.ok_button_text = "Apply"
+		_comp_filter_dialog.confirmed.connect(_on_comp_filter_confirmed)
+		_comp_filter_dialog.canceled.connect(_on_comp_filter_cancelled)
+		_comp_filter_box = VBoxContainer.new()
+		_comp_filter_box.name = "ComponentFilterBox"
+		_comp_filter_box.add_theme_constant_override("separation", 4)
+		_comp_filter_dialog.add_child(_comp_filter_box)
+		add_child(_comp_filter_dialog)
+	_populate_comp_filter_dialog()
+	_comp_filter_dialog.popup_centered()
+
+
+func _populate_comp_filter_dialog() -> void:
+	for child in _comp_filter_box.get_children():
+		_comp_filter_box.remove_child(child)
+		child.queue_free()
+	_comp_filter_checks = {}
+	# All/Any mode selector.
+	var header := HBoxContainer.new()
+	header.name = "ModeRow"
+	var mode_label := Label.new()
+	mode_label.text = "Match:"
+	header.add_child(mode_label)
+	_comp_filter_option = OptionButton.new()
+	_comp_filter_option.name = "ModeOption"
+	_comp_filter_option.add_item("All selected components", 0)
+	_comp_filter_option.add_item("Any selected component", 1)
+	_comp_filter_option.select(1 if _entities_comp_filter_any else 0)
+	header.add_child(_comp_filter_option)
+	_comp_filter_box.add_child(header)
+	_comp_filter_box.add_child(HSeparator.new())
+	# One checkbox per registered component (from the snapshot's components data).
+	var comps: Variant = _last_components
+	var added := false
+	if comps is Array:
+		for cdata in comps:
+			if not (cdata is Dictionary):
+				continue
+			var cname := str(cdata.get("name", ""))
+			if cname == "":
+				continue
+			var cb := CheckBox.new()
+			cb.text = cname
+			cb.button_pressed = _entities_comp_filter.has(cname)
+			_comp_filter_box.add_child(cb)
+			_comp_filter_checks[cname] = cb
+			added = true
+	if not added:
+		var none := Label.new()
+		none.text = "No components registered yet."
+		_comp_filter_box.add_child(none)
+
+
+func _on_comp_filter_confirmed() -> void:
+	_entities_comp_filter_any = _comp_filter_option.get_selected_id() == 1
+	_entities_comp_filter.clear()
+	for cname in _comp_filter_checks:
+		if (_comp_filter_checks[cname] as CheckBox).button_pressed:
+			_entities_comp_filter[cname] = true
+	_refresh_comp_filter_summary()
+	_render_entities()
+
+
+func _on_comp_filter_cancelled() -> void:
+	# Nothing to undo: the dialog is repopulated from state on every open.
+	pass
+
+
+func _on_clear_comp_filter() -> void:
+	_entities_comp_filter.clear()
+	_entities_comp_filter_any = false
+	_refresh_comp_filter_summary()
+	_render_entities()
+
+
+func _refresh_comp_filter_summary() -> void:
+	if _entities_filter_summary == null:
+		return
+	var n := _entities_comp_filter.size()
+	if n == 0:
+		_entities_filter_summary.text = "No component filter"
+	else:
+		var mode := "Any" if _entities_comp_filter_any else "All"
+		_entities_filter_summary.text = "%d component%s selected (%s)" % [n, "s" if n != 1 else "", mode]
+
+
+## W3 predicate: does this entity satisfy the active component filter? An empty
+## selection means no filter. All-mode requires every selected component; Any-mode
+## requires at least one.
+func _entity_passes_comp_filter(edata: Dictionary) -> bool:
+	if _entities_comp_filter.is_empty():
+		return true
+	var comps: Variant = edata.get("components", {})
+	var names := {}
+	if comps is Dictionary:
+		for cname in comps:
+			names[str(cname)] = true
+	if _entities_comp_filter_any:
+		for cname in _entities_comp_filter:
+			if names.has(cname):
+				return true
+		return false
+	for cname in _entities_comp_filter:
+		if not names.has(cname):
+			return false
+	return true
 
 
 # ---------------------------------------------------------------- requests ----
