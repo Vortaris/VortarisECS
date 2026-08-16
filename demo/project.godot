@@ -19,12 +19,6 @@ config/features=PackedStringArray("4.7", "Forward Plus")
 window/size/viewport_width=1280
 window/size/viewport_height=720
 
-[vortarisecs]
+[editor_plugins]
 
-general/verbose=false
-general/auto_shutdown_on_exit=true
-general/max_snapshot_entities=500
-debug/auto_refresh_interval=1.0
-network/default_sync_priority=2
-observer/default_throttle_tick=0
-serialization/compact_json=false
+enabled=PackedStringArray("res://addons/vortarisecs/plugin.cfg")
