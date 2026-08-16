@@ -220,6 +220,14 @@
 				[method VECSEntity.getf] 的便捷语法：读取 [param entity] 上某个组件的单个字段。若组件或字段不存在则返回 [param default]（默认是空 [Variant]）。
 			</description>
 		</method>
+		<method name="get_snapshot_data">
+			<return type="Dictionary" />
+			<description>
+				Returns a JSON-able [Dictionary] describing the whole world for the editor's remote ECS monitor: [code]{"protocol", "version", "stats", "components", "systems", "entities"}[/code]. [code]stats[/code] is the same dictionary as [method get_debug_stats]; [code]components[/code] lists every registered component type (name, id, size, and a [code]fields[/code] array of name/type/count/sync_priority/networked); [code]systems[/code] lists every registered system (name/group/active/paused/tick_interval/flush_mode); [code]entities[/code] is the same data as [method entities_to_data]. The game-side message capture sends this to the editor over the EngineDebugger channel (prefix [code]"vecs"[/code]) on demand. Building the full entity table every frame is expensive, so request it on demand (see the editor's "ECS" debugger tab).
+
+				返回一个可 JSON 化的 [Dictionary]，用于编辑器的远程 ECS 监视器，描述整个世界：[code]{"protocol", "version", "stats", "components", "systems", "entities"}[/code]。[code]stats[/code] 与 [method get_debug_stats] 相同；[code]components[/code] 列出每个已注册组件类型（name、id、size，以及 [code]fields[/code] 数组，含 name/type/count/sync_priority/networked）；[code]systems[/code] 列出每个已注册系统（name/group/active/paused/tick_interval/flush_mode）；[code]entities[/code] 与 [method entities_to_data] 相同。游戏侧消息捕获经 EngineDebugger 通道（前缀 [code]"vecs"[/code]）按需发送给编辑器。每帧构建完整实体表代价高昂，请按需请求（见编辑器 “ECS” 调试选项卡）。
+			</description>
+		</method>
 		<method name="get_world">
 			<return type="VECSWorld" />
 			<description>

@@ -119,6 +119,18 @@ public:
 	void set_verbose(bool p_on);
 	bool is_verbose() const;
 
+	// ---- remote runtime monitor (EngineDebugger) ----
+	// Returns a JSON-able Dictionary describing the whole world for the editor's
+	// remote ECS monitor (see addons/vortarisecs/editor/ecs_debugger_*.gd):
+	// { "protocol", "version", "stats", "components": [...], "systems": [...],
+	// "entities": [...] }. Sending the whole entity table every frame is costly,
+	// so this is only computed on demand when the editor requests a snapshot.
+	godot::Dictionary get_snapshot_data();
+	// Internal: receives "vecs:*" messages from the editor debugger (game side).
+	// Not bound to GDScript. Responds to "req_snapshot" by sending back a
+	// "vecs:snapshot" message carrying [get_snapshot_data()].
+	void _debugger_capture(const godot::String &p_message, const godot::Variant &p_data);
+
 	// ---- per-frame driver ----
 	void process(double p_delta, const godot::String &p_group);
 

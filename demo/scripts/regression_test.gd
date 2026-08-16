@@ -38,6 +38,8 @@ extends SceneTree
 # 0.2.1 additions:
 #   T33 verbose logging flag (set_verbose / is_verbose + project setting)
 #   T34 failed JSON snapshot load restores the live world instead of clearing it
+# 0.3.0 additions:
+#   T35 get_snapshot_data() remote-monitor snapshot structure
 
 const EcsTestUtil := preload("res://scripts/ecs_test_util.gd")
 
@@ -75,6 +77,7 @@ func _initialize() -> void:
 	_test_t32_sync_throttle(t)
 	_test_t33_verbose_flag(t)
 	_test_t34_bad_snapshot_preserves_world(t)
+	_test_t35_snapshot_data(t)
 	print("total=", t.total, " failures=", t.failures)
 	if t.failures == 0:
 		print("=== VortarisECS Regression OK ===")
@@ -975,3 +978,68 @@ func _test_t34_bad_snapshot_preserves_world(t: RefCounted) -> void:
 
 	w.free()
 	w2.free()
+
+
+# T35: get_snapshot_data() — the remote-monitor snapshot Dictionary structure
+# (protocol / version / stats / components / systems / entities) consumed by the
+# editor's "ECS" debugger tab.
+func _test_t35_snapshot_data(t: RefCounted) -> void:
+	print("-- T35: get_snapshot_data structure --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T35C", [{"name": "x", "type": "F32"}, {"name": "s", "type": "StringFixed", "count": 8}])
+	var e: VECSEntity = w.create_entity()
+	e.add_component("T35C", {"x": 1.5, "s": "abc"})
+	var sys: ViewSystem = ViewSystem.new()
+	sys.name = "ViewT35"
+	sys.group = "t35"
+	w.add_system(sys)
+
+	# The extension registers the "vecs" EngineDebugger message capture at module
+	# init in every non-editor process (this script runs headless, so it must be
+	# present). The editor's "ECS" debugger tab sends vecs:req_snapshot over it.
+	if not Engine.is_editor_hint():
+		t.expect_eq(EngineDebugger.has_capture("vecs"), true, "T35: game-side vecs capture registered")
+
+	var snap: Dictionary = w.get_snapshot_data()
+	t.expect_eq(int(snap["protocol"]), 1, "T35: protocol version is 1")
+	t.expect(int(snap["version"]) > 0, "T35: snapshot version present")
+	t.expect(snap.has("stats"), "T35: stats key present")
+	t.expect(snap.has("components"), "T35: components key present")
+	t.expect(snap.has("systems"), "T35: systems key present")
+	t.expect(snap.has("entities"), "T35: entities key present")
+	t.expect_eq(int(snap["stats"]["entity_count"]), 1, "T35: stats.entity_count")
+
+	var ents: Array = snap["entities"]
+	t.expect_eq(ents.size(), 1, "T35: one entity exported")
+	var edata: Dictionary = ents[0]
+	t.expect_eq(int(edata["id"]), e.get_id(), "T35: entity id preserved")
+	var comps: Dictionary = edata["components"]
+	t.expect(comps.has("T35C"), "T35: entity carries T35C")
+	t.expect_eq(float(comps["T35C"]["x"]), 1.5, "T35: field x value")
+	t.expect_eq(String(comps["T35C"]["s"]), "abc", "T35: StringFixed field value")
+
+	var comp_found := false
+	for cdata in snap["components"]:
+		if String(cdata["name"]) == "T35C":
+			comp_found = true
+			t.expect(int(cdata["size"]) > 0, "T35: component size positive")
+			var fields: Array = cdata["fields"]
+			t.expect_eq(fields.size(), 2, "T35: two fields in registry entry")
+			t.expect_eq(String(fields[0]["name"]), "x", "T35: field name x")
+			t.expect_eq(String(fields[0]["type"]), "F32", "T35: field type F32")
+			t.expect_eq(int(fields[0]["count"]), 1, "T35: scalar count 1")
+			t.expect_eq(String(fields[1]["type"]), "StringFixed", "T35: StringFixed type")
+	t.expect_eq(comp_found, true, "T35: T35C present in component registry")
+
+	var sys_found := false
+	for sdata in snap["systems"]:
+		if String(sdata["name"]) == "ViewT35":
+			sys_found = true
+			t.expect_eq(String(sdata["group"]), "t35", "T35: system group")
+			t.expect_eq(bool(sdata["active"]), true, "T35: system active")
+			t.expect_eq(bool(sdata["paused"]), false, "T35: system not paused")
+	t.expect_eq(sys_found, true, "T35: ViewSystem listed in systems")
+
+	w.remove_system(sys)
+	sys.free()
+	w.free()

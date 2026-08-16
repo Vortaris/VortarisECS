@@ -168,4 +168,11 @@ size_t SystemScheduler::system_count() const {
 	return n;
 }
 
+void SystemScheduler::collect_systems(std::vector<VECSSystem *> &r_out) const {
+	r_out.clear();
+	for (const auto &kv : systems_by_group_) {
+		r_out.insert(r_out.end(), kv.second.begin(), kv.second.end());
+	}
+}
+
 } // namespace vortaris

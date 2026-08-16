@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <unordered_set>
 
+#include <godot_cpp/classes/engine_debugger.hpp>
 #include <godot_cpp/classes/json.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
@@ -493,6 +494,108 @@ godot::Dictionary VECSWorld::get_debug_stats() const {
 	return out;
 }
 
+namespace {
+const char *debug_field_type_name(vortaris::FieldType p_t) {
+	switch (p_t) {
+		case vortaris::FieldType::Bool: return "Bool";
+		case vortaris::FieldType::I8: return "I8";
+		case vortaris::FieldType::I16: return "I16";
+		case vortaris::FieldType::I32: return "I32";
+		case vortaris::FieldType::I64: return "I64";
+		case vortaris::FieldType::U8: return "U8";
+		case vortaris::FieldType::U16: return "U16";
+		case vortaris::FieldType::U32: return "U32";
+		case vortaris::FieldType::U64: return "U64";
+		case vortaris::FieldType::F32: return "F32";
+		case vortaris::FieldType::F64: return "F64";
+		case vortaris::FieldType::Vector2: return "Vector2";
+		case vortaris::FieldType::Vector2i: return "Vector2i";
+		case vortaris::FieldType::Vector3: return "Vector3";
+		case vortaris::FieldType::Vector3i: return "Vector3i";
+		case vortaris::FieldType::Vector4: return "Vector4";
+		case vortaris::FieldType::Vector4i: return "Vector4i";
+		case vortaris::FieldType::Color: return "Color";
+		case vortaris::FieldType::Quaternion: return "Quaternion";
+		case vortaris::FieldType::Basis: return "Basis";
+		case vortaris::FieldType::Transform2D: return "Transform2D";
+		case vortaris::FieldType::Transform3D: return "Transform3D";
+		case vortaris::FieldType::AABB: return "AABB";
+		case vortaris::FieldType::Rect2: return "Rect2";
+		case vortaris::FieldType::Plane: return "Plane";
+		case vortaris::FieldType::StringFixed: return "StringFixed";
+		case vortaris::FieldType::Blob: return "Blob";
+	}
+	return "";
+}
+} // namespace
+
+godot::Dictionary VECSWorld::get_snapshot_data() {
+	godot::Dictionary out;
+	out["protocol"] = static_cast<int64_t>(1);
+	out["version"] = static_cast<int64_t>(vortaris::SNAPSHOT_VERSION);
+	out["stats"] = get_debug_stats();
+
+	// Registered component types (the process-global registry).
+	godot::Array comps;
+	const vortaris::ComponentRegistry &reg = core_->registry();
+	for (size_t i = 0; i < reg.count(); ++i) {
+		const vortaris::ComponentSchema *s = reg.schema_of(static_cast<vortaris::ComponentTypeId>(i + 1));
+		if (!s) {
+			continue;
+		}
+		godot::Dictionary cd;
+		cd["name"] = godot::String(s->type_name);
+		cd["id"] = static_cast<int64_t>(s->type_id);
+		cd["size"] = static_cast<int64_t>(s->size);
+		godot::Array fields;
+		for (const vortaris::FieldDescriptor &f : s->fields) {
+			godot::Dictionary fd;
+			fd["name"] = godot::String(f.name);
+			fd["type"] = godot::String(debug_field_type_name(f.type));
+			fd["count"] = static_cast<int64_t>(f.count);
+			fd["sync_priority"] = static_cast<int64_t>(f.sync_priority);
+			fd["networked"] = f.is_networked;
+			fields.append(fd);
+		}
+		cd["fields"] = fields;
+		comps.append(cd);
+	}
+	out["components"] = comps;
+
+	// Registered systems (name / group / enabled flags).
+	godot::Array systems;
+	std::vector<VECSSystem *> syslist;
+	scheduler_->collect_systems(syslist);
+	for (VECSSystem *s : syslist) {
+		godot::Dictionary sd;
+		sd["name"] = s->get_system_name();
+		sd["group"] = s->get_group();
+		sd["active"] = s->get_active();
+		sd["paused"] = s->get_paused();
+		sd["tick_interval"] = s->get_tick_interval();
+		sd["flush_mode"] = static_cast<int64_t>(s->get_flush_mode());
+		systems.append(sd);
+	}
+	out["systems"] = systems;
+
+	out["entities"] = entities_to_data();
+	return out;
+}
+
+void VECSWorld::_debugger_capture(const godot::String &p_message, const godot::Variant &p_data) {
+	(void)p_data; // the request carries no payload
+	if (p_message != "req_snapshot") {
+		return;
+	}
+	godot::EngineDebugger *dbg = godot::EngineDebugger::get_singleton();
+	if (!dbg || !dbg->is_active()) {
+		return;
+	}
+	godot::Array payload;
+	payload.append(get_snapshot_data());
+	dbg->send_message("vecs:snapshot", payload);
+}
+
 void VECSWorld::set_verbose(bool p_on) {
 	vortaris::set_verbose(p_on);
 }
@@ -824,6 +927,7 @@ void VECSWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("copy_entity_to", "entity", "target"), &VECSWorld::copy_entity_to);
 	ClassDB::bind_method(D_METHOD("merge_world", "source"), &VECSWorld::merge_world);
 	ClassDB::bind_method(D_METHOD("get_debug_stats"), &VECSWorld::get_debug_stats);
+	ClassDB::bind_method(D_METHOD("get_snapshot_data"), &VECSWorld::get_snapshot_data);
 	ClassDB::bind_method(D_METHOD("set_verbose", "on"), &VECSWorld::set_verbose);
 	ClassDB::bind_method(D_METHOD("is_verbose"), &VECSWorld::is_verbose);
 	ClassDB::bind_method(D_METHOD("process", "delta", "group"), &VECSWorld::process, DEFVAL(""));

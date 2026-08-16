@@ -26,6 +26,9 @@ public:
 	void process(World &p_world, double p_delta, const godot::String &p_group);
 	void clear();
 	size_t system_count() const;
+	// Appends every registered system (in group map order) to r_out. Used by the
+	// runtime remote monitor to enumerate name/group/enabled for the editor UI.
+	void collect_systems(std::vector<VECSSystem *> &r_out) const;
 
 private:
 	void recompute_order(const godot::StringName &p_group);

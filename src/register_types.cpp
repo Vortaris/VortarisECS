@@ -3,9 +3,11 @@
 #include <gdextension_interface.h>
 
 #include <godot_cpp/classes/engine.hpp>
+#include <godot_cpp/classes/engine_debugger.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/godot.hpp>
+#include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 
 #include "demo/systems.h"
@@ -64,6 +66,19 @@ void initialize_vortarisecs_module(ModuleInitializationLevel p_level) {
 
 	g_vecs_singleton = memnew(VECSWorld);
 	Engine::get_singleton()->register_singleton("VECS", g_vecs_singleton);
+
+	// Register the EngineDebugger message capture so the editor's remote ECS
+	// monitor (addons/vortarisecs/editor/ecs_debugger_*.gd) can request world
+	// snapshots from the RUNNING game. The editor process itself is skipped (its
+	// world is empty and it must not listen to its own debugger); in a standalone
+	// or headless run EngineDebugger is inactive, so the capture is a no-op until
+	// a debugger actually connects.
+	if (!Engine::get_singleton()->is_editor_hint()) {
+		EngineDebugger *dbg = EngineDebugger::get_singleton();
+		if (dbg) {
+			dbg->register_message_capture("vecs", callable_mp(g_vecs_singleton, &VECSWorld::_debugger_capture));
+		}
+	}
 }
 
 void uninitialize_vortarisecs_module(ModuleInitializationLevel p_level) {
@@ -71,6 +86,16 @@ void uninitialize_vortarisecs_module(ModuleInitializationLevel p_level) {
 		return;
 	}
 	if (g_vecs_singleton) {
+		// Unregister the debugger capture BEFORE deleting the world: the Callable
+		// holds a raw pointer to the singleton, so calling it after memdelete
+		// would be use-after-free. Mirrors the registration guard: the editor
+		// process never registered it, so it must not be unregistered here.
+		if (!Engine::get_singleton()->is_editor_hint()) {
+			EngineDebugger *dbg = EngineDebugger::get_singleton();
+			if (dbg) {
+				dbg->unregister_message_capture("vecs");
+			}
+		}
 		// Tear down the world (deferred ops, observer callbacks, scheduler,
 		// change baselines) BEFORE clearing the component registry: the world's
 		// cleanup must not touch already-cleared StringName schema names.
