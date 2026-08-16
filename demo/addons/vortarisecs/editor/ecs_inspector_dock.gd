@@ -10,7 +10,9 @@ extends VBoxContainer
 ##
 ## IMPORTANT: because of process isolation, this dock can ONLY see the editor
 ## process's world — which is empty. It does NOT see a world built inside a
-## running (F5) game. To debug the running game, use the runtime overlay
+## running (F5) game. To debug the running game, use the remote monitor "ECS"
+## tab in the editor debugger bottom panel (ecs_debugger_plugin.gd, shown while
+## a game runs — the recommended GUI), the runtime overlay
 ## (addons/vortarisecs/ecs_overlay.gd, enabled with --vortaris-ecs-overlay on
 ## or the F2 key), the headless CLI args (--vortaris-ecs-stats /
 ## --vortaris-ecs-snapshot), or MCP run_script. See docs/AI_DEBUGGING.md.
