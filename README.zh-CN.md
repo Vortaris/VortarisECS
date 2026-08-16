@@ -19,6 +19,12 @@
 - **确定性二进制序列化** —— 小端、定宽、逐字节一致（byte-identical）的快照。
 - **可插拔网络同步** —— `VECSSyncStrategy` 抽象 + 默认的服务器权威快照复制（脏检查增量 + 定期对账 + 反幽灵）。传输层是 Godot 的 MultiplayerAPI（RPC），另附进程内直连测试传输。
 
+## 0.3.0 新特性
+
+- **运行时远程监控 GUI** —— 游戏运行时，编辑器调试器底部面板新增 **“ECS”** 选项卡，实时显示**运行中**游戏的 ECS 世界：Entities（实体 id → 组件 → 字段）、Components（组件注册表及字段元数据）、Systems（名称/分组/启用状态）与 Stats（世界统计）。原理同 Godot 场景树的 Remote 模式：编辑器经 `EngineDebugger` 发送 `vecs:req_snapshot`，游戏用新的 `VECSWorld.get_snapshot_data()` 回发 `vecs:snapshot`。提供“刷新”按钮与可选 ~1Hz 自动刷新；快照仅按需发送。
+- **`VECSWorld.get_snapshot_data()`** —— 返回整个世界的可 JSON 化 Dictionary（`stats` / `components` / `systems` / `entities`）；供编辑器选项卡使用。
+- 原有检查器 dock（`editor/ecs_inspector_dock.gd`）保留，仍用于查看编辑器侧世界；**运行中**游戏请使用新的调试器选项卡。
+
 ## 0.2.1 新特性
 
 - **运行时调试 overlay** —— 编辑器检查器 dock 因进程隔离只能看到编辑器进程的世界（为空），因此新增游戏进程内的 overlay（`addons/vortarisecs/ecs_overlay.gd` + `ecs_overlay.tscn`），实时显示**运行中**世界的统计、实体→组件→字段浏览树，以及 JSON 快照导出/导入。默认关闭，用 `--vortaris-ecs-overlay on` 或游戏内按 **F2** 开关。

@@ -22,6 +22,20 @@ Design reference: [GECS](https://github.com/BlockBreaker-Studios/GECS) — its a
 - **Deterministic binary serialization** — little-endian, fixed-width, byte-identical snapshots.
 - **Pluggable network sync** — `VECSSyncStrategy` abstraction with a default server-authoritative snapshot replication (dirty-checked deltas + periodic reconciliation + anti-ghost). Transport is Godot's MultiplayerAPI (RPC), with a direct in-process test transport.
 
+## What's new in 0.3.0
+
+- **Runtime remote monitoring GUI** — while a game runs, the editor's debugger
+  bottom panel gets an **"ECS"** tab that shows the *running* game's live world:
+  Entities (id → component → field), Components (registry with field metadata),
+  Systems (name/group/active) and Stats. Works like Godot's scene-tree Remote
+  mode: the editor sends `vecs:req_snapshot` over `EngineDebugger`, the game
+  replies with `vecs:snapshot` from the new `VECSWorld.get_snapshot_data()`.
+  Refresh button + optional ~1 Hz auto-refresh; snapshots are on-demand only.
+- **`VECSWorld.get_snapshot_data()`** — JSON-able Dictionary of the whole world
+  (`stats` / `components` / `systems` / `entities`); used by the editor tab.
+- The existing inspector dock (`editor/ecs_inspector_dock.gd`) remains for the
+  editor-side world; the new debugger tab is the one that sees the running game.
+
 ## What's new in 0.2.1
 
 - **Runtime debug overlay** — the editor inspector dock can only see the

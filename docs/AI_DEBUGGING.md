@@ -1,22 +1,60 @@
 # AI Debugging Guide for VortarisECS
 
 This guide is written for AI agents (and humans) debugging a **running** VortarisECS
-game. It covers three ways to inspect the live ECS world:
+game. It covers four ways to inspect the live ECS world:
 
-1. **MCP `run_script`** — call the plugin API directly from inside the running game.
-2. **Headless CLI arguments** — one-shot stats / snapshot dumps via the demo bootstrap.
-3. **Runtime overlay** — an in-game HUD for interactive browsing.
+1. **Editor remote monitor** — an "ECS" tab in the editor debugger bottom panel
+   that shows the running game's world live (EditorDebuggerPlugin, "Remote" mode).
+2. **MCP `run_script`** — call the plugin API directly from inside the running game.
+3. **Headless CLI arguments** — one-shot stats / snapshot dumps via the demo bootstrap.
+4. **Runtime overlay** — an in-game HUD for interactive browsing.
 
 > **Important (process isolation).** The editor inspector dock
 > (`addons/vortarisecs/editor/ecs_inspector_dock.gd`) runs in the **editor**
 > process, which has its own (empty) VortarisECS world. It **cannot** see a world
 > built inside a running (F5) game — that is the whole reason the runtime overlay
-> exists. To debug a running game, use the runtime overlay, the headless CLI
+> and the remote debugger tab exist. To debug a running game, use the **editor
+> debugger tab** (start the game with F5), the runtime overlay, the headless CLI
 > arguments, or MCP `run_script` — never the editor dock.
 
 ---
 
-## 1. MCP `run_script` (Godot MCP)
+## 0. Editor remote monitor (debugger "ECS" tab)
+
+The editor ships an `EditorDebuggerPlugin` (see
+`addons/vortarisecs/editor/ecs_debugger_plugin.gd` and
+`ecs_debugger_tab.gd`) that adds an **"ECS"** tab to the debugger bottom panel
+while a game runs:
+
+1. Run the game from the editor (**F5** — a debug session must be attached).
+2. Open the bottom **Debugger** panel and switch to the **ECS** tab.
+3. Use **Refresh** (or leave **Auto refresh (1s)** on) to fetch a fresh snapshot.
+
+The tab has four pages rendered from the snapshot Dictionary:
+
+| Page | Shows |
+|---|---|
+| Entities | entity id → component → field = value (capped at 500 entities) |
+| Components | every registered component type: name, size, and per-field type / count / sync_priority / networked |
+| Systems | every registered system: name, group, active / paused, tick_interval, flush_mode |
+| Stats | `get_debug_stats()`: entity / archetype / component / observer counts, change_tick, pool size, query cache |
+
+### How it works (wire protocol)
+
+The game side registers an `EngineDebugger` message capture with prefix `vecs`
+(the extension does this automatically in non-editor processes):
+
+- **editor → game:** `vecs:req_snapshot` (data `[]`)
+- **game → editor:** `vecs:snapshot` (data `[<snapshot Dictionary>]`)
+
+The snapshot Dictionary comes from the new `VECSWorld.get_snapshot_data()`:
+`{ "protocol", "version", "stats", "components", "systems", "entities" }`.
+Snapshots are **on-demand only** — they are sent when the editor asks, never
+every frame. The whole pipeline is inside the plugin; no demo code is required.
+
+---
+
+## 2. MCP `run_script` (Godot MCP)
 
 The Godot MCP server can execute arbitrary GDScript inside the running project.
 Scripts must `extends RefCounted` and define `func execute(scene_tree) -> Variant`.
@@ -118,7 +156,7 @@ builds compile them out entirely.
 
 ---
 
-## 2. Headless CLI arguments
+## 3. Headless CLI arguments
 
 The demo bootstrap (`demo/scripts/main.gd`) parses `OS.get_cmdline_user_args()`
 (the arguments after `--`). **Actions run AFTER the demo builds the world**, so
@@ -170,7 +208,7 @@ Sample `--vortaris-ecs-snapshot` output:
 
 ---
 
-## 3. Runtime overlay
+## 4. Runtime overlay
 
 The runtime overlay (`addons/vortarisecs/ecs_overlay.gd` + `ecs_overlay.tscn`) is
 a `CanvasLayer` HUD that lives **inside the game process** and shows the real,

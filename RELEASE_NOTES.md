@@ -1,5 +1,44 @@
 # VortarisECS Release Notes
 
+## 0.3.0 (2026-08-16)
+
+**Runtime remote monitoring GUI.** The editor can now inspect a **running** game's
+ECS world live, the same way Godot's scene tree Remote mode works — via an
+"ECS" tab in the editor debugger bottom panel.
+
+### Remote monitor (editor ↔ game over EngineDebugger)
+
+- **Game side (C++)** — the extension registers an
+  `EngineDebugger` message capture with prefix `vecs` (in non-editor processes
+  only). On `vecs:req_snapshot` it answers `vecs:snapshot` carrying a JSON-able
+  Dictionary from the new `VECSWorld.get_snapshot_data()`.
+- **Snapshot format** — `{ "protocol", "version", "stats", "components",
+  "systems", "entities" }`: `stats` is `get_debug_stats()`, `components` lists
+  every registered component type (name / id / size / fields with
+  type-count-sync_priority-networked), `systems` lists every registered system
+  (name / group / active / paused / tick_interval / flush_mode), `entities` is
+  `entities_to_data()`.
+- **Editor side (GDScript)** — new `EditorDebuggerPlugin`
+  (`addons/vortarisecs/editor/ecs_debugger_plugin.gd`) adds an **"ECS"** tab to
+  the debugger bottom panel while a game runs. The tab has four pages:
+  **Entities** (id → component → field = value), **Components** (registry with
+  field metadata), **Systems** (name/group/active/paused) and **Stats**
+  (world counters), plus a Refresh button and an optional ~1 Hz auto-refresh.
+  The entity browser caps display at 500 entities.
+- **On-demand only** — snapshots are sent when the editor asks (refresh click /
+  auto-refresh / session start), never every frame.
+- **Difference vs the inspector dock** — the existing
+  `editor/ecs_inspector_dock.gd` (editor dock, right panel) can only see the
+  *editor* process's empty world; the new debugger tab sees the *running* game.
+  Both are documented in `docs/AI_DEBUGGING.md`.
+
+### API / docs / tests
+
+- New public API: `VECSWorld.get_snapshot_data()` (doc_class + regression T35).
+- `SystemScheduler` gained `collect_systems()` (internal) to enumerate systems
+  for the snapshot.
+- `plugin.cfg` version → `0.3.0`; README/README.zh-CN updated.
+
 ## 0.2.1 (2026-08-15)
 
 Patch release focused on **debuggability**: an in-game runtime overlay, a
