@@ -64,7 +64,75 @@ var n := w.query().with_all(["Pos", "Vel"]).count()
 var one := w.query().with_all(["Pos"]).execute_one()
 ```
 
-## 6. Save and load
+## 6. Typed field access (0.3.1)
+
+`getf`/`setf` return a Variant, so the old idiom was `int(comp.get_field("hp"))`.
+The typed getters read a field **directly as the requested type** — no casts:
+
+```gdscript
+var e: VECSEntity = w.spawn({"Combatant": {"hp": 30.0, "level": 5, "owner": 7}})
+var hp: float = e.getf_float("Combatant", "hp")        # or e.get_component("Combatant").get_float("hp")
+var lvl: int   = e.getf_int("Combatant", "level")
+var alive: bool = e.getf_bool("Combatant", "is_alive")
+var name: String = e.getf_string("Combatant", "name")
+var pos: Variant = e.getf_vector("Combatant", "position")   # Vector2/3/4 (+ i variants)
+```
+
+Typed getters exist on both `VECSEntity` (`getf_int` / `getf_float` / `getf_bool`
+/ `getf_string` / `getf_vector`) and `VECSComponent` (`get_int` / `get_float` /
+`get_bool` / `get_string` / `get_vector`). A missing component/field returns the
+type's zero value (`0` / `0.0` / `false` / `""` / null).
+
+## 7. Field-equality query (0.3.1)
+
+The old "find everything I own" scan was: query all `Combatant`, then loop over
+the results comparing the `owner` field in GDScript. `field_equals` moves the
+comparison into the query (C++ side, no per-entity callback):
+
+```gdscript
+var eid := 7
+var owned: Array = w.query() \
+    .with_all(["Combatant"]) \
+    .field_equals("Combatant", "owner", eid) \
+    .execute()          # also applied by execute_one() and count()
+```
+
+Each call adds one equality constraint; all must hold (AND). Equality follows
+GDScript `==` semantics, so an I64 field matches an int, and an F32 `0.0` matches
+an int `0`.
+
+## 8. Spawn + observer conveniences (0.3.1)
+
+```gdscript
+# create_with_components: create + add components in one call, absent fields
+# filled with schema defaults (0 / "" / false / zeroed array slots).
+var unit: VECSEntity = w.create_with_components(0, {"Combatant": {"hp": 30.0}})
+# def_id <= 0 auto-assigns; a positive def_id preassigns that id.
+
+# on_changed: event-driven instead of polling hp every frame.
+var changes := []
+var obs: VECSObserver = w.on_changed("Combatant", {
+    "fields": ["hp"],
+    "callable": func(_ev: int, ent: VECSEntity, _p: Variant) -> void: changes.append(ent.get_id()),
+})
+unit.get_component("Combatant").set_field("hp", 31.0)   # fires the callback
+w.remove_observer(obs)
+obs.free()                                              # caller owns the observer
+
+# Or build an observer without subclassing at all:
+var obs2: VECSObserver = VECSObserver.new()
+obs2.set_callback(func(event: int, entity: VECSEntity, payload: Variant) -> void: pass)
+obs2.on_changed()
+obs2.set_components(["Combatant"])
+obs2.set_fields(["hp"])
+w.add_observer(obs2)
+```
+
+`field_contains(name, value)` is the one-call array-membership check:
+`comp.field_contains("tags", "burning")` is true when the scalar equals the
+value or any element of a fixed-array field does.
+
+## 9. Save and load
 
 ```gdscript
 var text := JSON.stringify(w.serialize_snapshot_json(), "\t")
@@ -90,11 +158,21 @@ When a system grows, reach for the rest of the toolbox — all documented in the
 - **Networking**: bind a `VECSNetworkSync` to a world; dirty-checked deltas and
   periodic reconciliation are handled for you.
 
-## Debugging a running game (0.2.x)
+## Debugging a running game (0.2.x → 0.3.x)
 
-Three ways to inspect the **live** world (added in 0.2.0/0.2.1) — full details
-in [`AI_DEBUGGING.md`](AI_DEBUGGING.md):
+Four ways to inspect the **live** world — full details in
+[`AI_DEBUGGING.md`](AI_DEBUGGING.md):
 
+- **Editor remote monitor** (0.3.0, recommended) — run the game from the editor
+  with **F5**, open the bottom **Debugger** panel, switch to the **ECS** tab:
+  - **Refresh** (or "Auto refresh (1s)") pulls a snapshot of the running game's
+    world: Entities / Components / Systems / Stats pages.
+  - **Live edit**: double-click a Value cell on the Entities page, type a new
+    value and press Enter — the change is type-checked and applied to the running
+    game (`VECSWorld.debug_set_field`).
+  - **Search / filter / sort**: each page has a search box; the Entities page
+    adds a mode dropdown (Mixed / By value / By component / Fuzzy) plus a
+    component picker (All / Any); click column headers to sort.
 - **Headless CLI** (after the world is built, output is `[vortarisecs]`-prefixed):
   - `godot --headless --path demo -- --vortaris-ecs-stats` — print
     `get_debug_stats()` JSON and exit 0.
@@ -105,6 +183,10 @@ in [`AI_DEBUGGING.md`](AI_DEBUGGING.md):
   browser and JSON snapshot export/import.
 - **MCP `run_script`** — call the plugin API directly inside a running game
   (`Engine.get_singleton("VECS").get_world()`).
+
+> Process isolation: the editor **inspector dock** sees only the editor's own
+> (empty) world. For the running game, use the debugger **ECS** tab, the overlay,
+> the headless CLI, or MCP.
 
 Also new: `world.set_verbose(true)` / `world.is_verbose()` toggle tiered verbose
 logging (debug builds only, gated by the `vortarisecs/general/verbose` project

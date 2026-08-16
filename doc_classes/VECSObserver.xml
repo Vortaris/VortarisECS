@@ -51,6 +51,14 @@
 				GDScript 覆写点，每个已订阅事件触发时调用。[param event] 是 [enum Event] 之一，[param entity] 是受影响的实体，[param payload] 携带事件特定数据（自定义载荷，组件事件则为空）。
 			</description>
 		</method>
+		<method name="get_callback" qualifiers="const">
+			<return type="Callable" />
+			<description>
+				Returns the callback set with [method set_callback], or an empty [Callable] if none was set.
+
+				返回用 [method set_callback] 设置的回调；未设置则返回空 [Callable]。
+			</description>
+		</method>
 		<method name="get_components" qualifiers="const">
 			<return type="Array" />
 			<description>
@@ -73,14 +81,6 @@
 				Returns the membership query set with [method set_match_components].
 
 				返回用 [method set_match_components] 设置的成员查询。
-			</description>
-		</method>
-		<method name="get_callback" qualifiers="const">
-			<return type="Callable" />
-			<description>
-				Returns the callback set with [method set_callback], or an empty [Callable] if none was set.
-
-				返回用 [method set_callback] 设置的回调；未设置则返回空 [Callable]。
 			</description>
 		</method>
 		<method name="get_throttle_tick" qualifiers="const">
@@ -174,15 +174,6 @@
 				把 CHANGED 派发限制为只处理所列字段：仅派发字段名在 [param names] 中的 CHANGED 事件。为空表示"观察所有字段"。过滤器非空时，组件级变更（无字段名）会被跳过。ADDED / REMOVED / MATCHED / UNMATCHED / 自定义事件不受影响。
 			</description>
 		</method>
-		<method name="set_throttle_tick">
-			<return type="void" />
-			<param index="0" name="ticks" type="int" />
-			<description>
-				Throttles CHANGED delivery using the world's monotonic change clock: at most one callback per [param ticks] change-clock ticks. This is a deterministic tick-based interval, not wall-clock time. Pass 0 (the default) to disable throttling.
-
-				用世界的单调变更时钟节流 CHANGED 派发：每 [param ticks] 个变更时钟 tick 最多回调一次。这是确定性的基于 tick 的间隔，而非墙钟时间。传 0（默认）关闭节流。
-			</description>
-		</method>
 		<method name="set_match_components">
 			<return type="void" />
 			<param index="0" name="names" type="Array" />
@@ -190,6 +181,15 @@
 				Sets the component-set query for MATCHED / UNMATCHED membership events. The observer tracks which entities match the set and reports transitions.
 
 				为 MATCHED / UNMATCHED 成员事件设置组件集查询。观察者跟踪哪些实体匹配该集合并报告状态转换。
+			</description>
+		</method>
+		<method name="set_throttle_tick">
+			<return type="void" />
+			<param index="0" name="ticks" type="int" />
+			<description>
+				Throttles CHANGED delivery using the world's monotonic change clock: at most one callback per [param ticks] change-clock ticks. This is a deterministic tick-based interval, not wall-clock time. Pass 0 (the default) to disable throttling.
+
+				用世界的单调变更时钟节流 CHANGED 派发：每 [param ticks] 个变更时钟 tick 最多回调一次。这是确定性的基于 tick 的间隔，而非墙钟时间。传 0（默认）关闭节流。
 			</description>
 		</method>
 	</methods>

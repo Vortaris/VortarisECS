@@ -42,15 +42,76 @@ The tab has four pages rendered from the snapshot Dictionary:
 ### How it works (wire protocol)
 
 The game side registers an `EngineDebugger` message capture with prefix `vecs`
-(the extension does this automatically in non-editor processes):
+(the extension does this automatically in non-editor processes — no demo code
+required). Four channels:
 
-- **editor → game:** `vecs:req_snapshot` (data `[]`)
-- **game → editor:** `vecs:snapshot` (data `[<snapshot Dictionary>]`)
+| Channel | Direction | Data |
+|---|---|---|
+| `vecs:req_snapshot` | editor → game | `[]` |
+| `vecs:snapshot` | game → editor | `[ <snapshot Dictionary> ]` |
+| `vecs:set_field` | editor → game | `[entity_id, comp, field, value]` |
+| `vecs:set_field_result` | game → editor | `[ok, entity_id, comp, field, error]` |
 
-The snapshot Dictionary comes from the new `VECSWorld.get_snapshot_data()`:
-`{ "protocol", "version", "stats", "components", "systems", "entities" }`.
-Snapshots are **on-demand only** — they are sent when the editor asks, never
-every frame. The whole pipeline is inside the plugin; no demo code is required.
+The snapshot Dictionary comes from `VECSWorld.get_snapshot_data()`:
+
+```json
+{
+  "protocol": 1,
+  "version": 5,
+  "stats":   { "entity_count": 10, "archetype_count": 8, "component_count": 7,
+               "observer_count": 0, "change_tick": 54, "pool_size": 0,
+               "query_cache_entries": 3 },
+  "components": [ { "name": "Position", "id": 1, "size": 12,
+                    "fields": [ { "name": "x", "type": "F32", "count": 1,
+                                  "sync_priority": 2, "networked": true } ] } ],
+  "systems": [ { "name": "MoveSystem", "group": "physics", "active": true,
+                 "paused": false, "tick_interval": 0.0, "flush_mode": 0 } ],
+  "entities": [ { "id": 1, "components": { "Position": { "x": 1.0 } } } ]
+}
+```
+
+- `stats` is the same dictionary as `get_debug_stats()`.
+- `entities` is `entities_to_data(max_entities)` — capped at
+  `vortarisecs/general/max_snapshot_entities` (default 500). When the cap cuts
+  the list, the snapshot also carries `"truncated": true` and `"entity_total"`
+  (the real world count); save-file serialization (`serialize_snapshot_json`)
+  never truncates.
+- Snapshots are **on-demand only** — sent when the editor asks, never every
+  frame. `set_field` writes go through `VECSWorld.debug_set_field()`, which
+  validates the entity/component/field and **type-checks** the value before
+  applying it (a mismatch returns `{"ok": false, "error": "type mismatch ..."}`
+  instead of silently zeroing the field).
+
+### Live editing, search, filter, sort (the tab's UX)
+
+- **Live value editing**: double-click a **Value** cell on the Entities page,
+  type and press Enter. The editor sends `vecs:set_field`; the game replies on
+  `vecs:set_field_result`. A rejected edit (type mismatch, dead entity, unknown
+  component/field) shows the error in the tab's status bar and the cell is
+  refreshed from the world's real value.
+- **Search**: every page has a search box (instant filter). The Entities search
+  has a mode dropdown:
+  - **Mixed** — id + component + value substring.
+  - **By value** — field values; supports `comp/field == value` (e.g.
+    `Combatant/hp == 30`).
+  - **By component** — component names only.
+  - **Fuzzy** — loose subsequence matching.
+- **Filter**: the Entities page's **Filter…** button opens a component picker
+  with an **All / Any** mode — show only entities carrying the selected
+  components. It ANDs with the text search.
+- **Sort**: clicking a column header sorts that page's top-level rows
+  (ascending / descending toggle, `↑`/`↓` glyph). Expanded/collapsed state
+  survives refresh, sort and filter.
+
+### Settings that affect the monitor
+
+| Setting | Default | Effect |
+|---|---|---|
+| `vortarisecs/general/max_snapshot_entities` | `500` | Caps the Entities page rows / snapshot `entities` array. |
+| `vortarisecs/debug/auto_refresh_interval` | `1.0` s | Auto-refresh timer interval (the "Auto refresh" checkbox). |
+
+Both are read fresh each time the tab is built, so editing them in Project
+Settings takes effect on the next editor session.
 
 ---
 
@@ -154,6 +215,88 @@ Verbose traces (`[vortarisecs][v] ...`) appear in `get_debug_output` /
 stdout. They are only emitted in **debug** builds (`template_debug`); release
 builds compile them out entirely.
 
+### Subscribe to component changes (observer, 0.3.1)
+
+`on_changed` is a one-call replacement for per-frame polling: the callback fires
+only when the watched field(s) actually changed.
+
+```gdscript
+extends RefCounted
+
+func execute(scene_tree: SceneTree) -> Variant:
+	var world: VECSWorld = Engine.get_singleton("VECS").get_world()
+	var hits := []
+	var obs: VECSObserver = world.on_changed("Combatant", {
+		"fields": ["hp"],
+		"callable": func(_ev: int, ent: VECSEntity, _p: Variant) -> void:
+			hits.append(ent.get_id()),
+	})
+	# ... later, force a change to observe the callback firing:
+	var some: Array = world.query().with_all(["Combatant"]).execute()
+	if some.size() > 0:
+		(some[0] as VECSEntity).get_component("Combatant").set_field("hp", 999.0)
+	await scene_tree.process_frame
+	world.remove_observer(obs)
+	obs.free()
+	return {"callback_fired_on": hits}
+```
+
+Or build the observer explicitly — `VECSObserver.new()` works since 0.3.1:
+
+```gdscript
+extends RefCounted
+
+func execute(scene_tree: SceneTree) -> Variant:
+	var world: VECSWorld = Engine.get_singleton("VECS").get_world()
+	var obs: VECSObserver = VECSObserver.new()
+	obs.set_callback(func(event: int, entity: VECSEntity, payload: Variant) -> void:
+		print("event=", event, " entity=", entity.get_id()))
+	obs.on_added()
+	obs.on_changed()
+	obs.set_components(["Combatant"])
+	obs.set_throttle_tick(2)
+	world.add_observer(obs)
+	return obs.get_world().get_debug_stats()["observer_count"]
+```
+
+### Write a field with type checking (`debug_set_field`)
+
+`world.debug_set_field(eid, comp, field, value)` is the same code path the
+editor's live edit uses. It validates the entity/component/field and rejects a
+value whose Variant type does not match the field:
+
+```gdscript
+extends RefCounted
+
+func execute(scene_tree: SceneTree) -> Variant:
+	var world: VECSWorld = Engine.get_singleton("VECS").get_world()
+	var e: VECSEntity = world.query().with_all(["Combatant"]).execute_one()
+	if e == null:
+		return {"error": "no Combatant"}
+	return {
+		"good": world.debug_set_field(e.get_id(), "Combatant", "hp", 42.0),
+		"bad":  world.debug_set_field(e.get_id(), "Combatant", "hp", "not a float"),
+	}
+# → {"good": {"ok": true, "error": ""}, "bad": {"ok": false, "error": "type mismatch ..."}}
+```
+
+### Dump the full remote-monitor snapshot
+
+```gdscript
+extends RefCounted
+
+func execute(scene_tree: SceneTree) -> Variant:
+	var world: VECSWorld = Engine.get_singleton("VECS").get_world()
+	var snap: Dictionary = world.get_snapshot_data()
+	return {
+		"protocol": snap.get("protocol"),
+		"stats": snap.get("stats"),
+		"entity_count_shown": (snap.get("entities", []) as Array).size(),
+		"truncated": snap.get("truncated", false),
+		"entity_total": snap.get("entity_total", 0),
+	}
+```
+
 ---
 
 ## 3. Headless CLI arguments
@@ -240,12 +383,20 @@ your own project's `addons/vortarisecs/` and instantiate it from your main scene
 |---|---|
 | `VECS.get_world()` | the `VECSWorld` node |
 | `world.get_debug_stats()` | `{entity_count, archetype_count, component_count, observer_count, change_tick, pool_size, query_cache_entries}` |
+| `world.get_snapshot_data()` | the editor-monitor snapshot `{protocol, version, stats, components, systems, entities}` (entities capped at `max_snapshot_entities`, with `truncated`/`entity_total`) |
 | `world.entity_count()` / `world.entity(id)` / `world.has_entity(id)` | count / live-entity lookup |
-| `world.entities_to_data()` | `[{id, components:{Name:{field:value}}}]` |
+| `world.entities_to_data(max_entities := 0)` | `[{id, components:{Name:{field:value}}}]`; `max_entities > 0` caps the export (0 = all) |
 | `world.serialize_snapshot_json()` / `world.deserialize_snapshot_json(x)` | JSON save / load (Dictionary or JSON String) |
 | `world.serialize_snapshot()` / `world.deserialize_snapshot(bytes)` | deterministic binary save / load |
 | `world.query().with_all([...]).changed([...]).execute()` | matched `VECSEntity[]` |
+| `world.query().with_all([...]).field_equals("Comp","field",v).execute()` | C++-side field-equality filter (0.3.1) |
 | `builder.get_last_execution_time_usec()` | µs of the last `execute()` |
+| `world.debug_set_field(eid, comp, field, value)` | `{"ok": bool, "error": String}` — type-checked runtime write |
+| `world.on_changed(comp, opts)` / `world.create_observer(callable, opts)` | a registered `VECSObserver` (0.3.1) |
+| `world.create_with_components(def_id, comps)` | spawn + add components, schema defaults filled (0.3.1) |
+| `ent.getf_int(comp, field)` / `getf_float` / `getf_bool` / `getf_string` / `getf_vector` | typed one-call field read (0.3.1) |
+| `comp.get_int(field)` / `get_float` / `get_bool` / `get_string` / `get_vector` | typed field read on a `VECSComponent` (0.3.1) |
+| `comp.field_contains(name, value)` | scalar-equals or any-array-element check (0.3.1) |
 | `world.set_verbose(true)` / `world.is_verbose()` | toggle / query verbose logging |
 
 See `docs/quickstart.md` and the `doc_classes/*.xml` class reference for the full

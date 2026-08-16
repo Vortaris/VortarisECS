@@ -55,12 +55,20 @@ that platform. The first time you open the project, Godot generates
 
 ## Verification
 
+The same headless checks work on every platform (they depend only on the demo
+project and the plugin DLL/so/dylib you built):
+
 ```bash
-godot --headless --path demo                                   # functional demo
-godot --headless --path demo --script res://scripts/regression_test.gd   # T1-T34, 143 assertions; exit 0 = all pass
-godot --headless --path demo --script res://scripts/quickstart.gd
-godot --headless --path demo --script res://scripts/perf_test.gd
+godot --headless --path demo                                   # functional demo (expect "=== VortarisECS Demo OK ===")
+godot --headless --path demo --script res://scripts/regression_test.gd   # T1-T42, 286 assertions; exit 0 = all pass
+godot --headless --path demo --script res://scripts/quickstart.gd        # minimal convenience-API example
+godot --headless --path demo --script res://scripts/perf_test.gd         # performance baseline
 ```
+
+The regression suite (`extends SceneTree`, runs in `_initialize()` and calls
+`quit(0/1)`) is the primary gate: any structural/behavioral change must keep it
+green. New behavior is added as a numbered `_test_tN_*` in
+`demo/scripts/regression_test.gd` and called from `_initialize()`.
 
 ### 0.2.x debug tooling (works headless on any platform)
 

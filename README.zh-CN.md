@@ -36,7 +36,7 @@
 - **`VECSWorld.serialize_snapshot_json_string()`** —— 以 String 形式导出 JSON 存档，遵循 `vortarisecs/serialization/compact_json`（紧凑 vs 格式化）。
 - **`VECSWorld.is_verbose()`** 现读取持久化设置（含旧路径回退），而非初始化时的快照缓存。
 
-## 0.3.0 新特性
+## 0.3.0 新特性（运行时远程监控）
 
 - **运行时远程监控 GUI** —— 游戏运行时，编辑器调试器底部面板新增 **“ECS”** 选项卡，实时显示**运行中**游戏的 ECS 世界：Entities（实体 id → 组件 → 字段）、Components（组件注册表及字段元数据）、Systems（名称/分组/启用状态）与 Stats（世界统计）。原理同 Godot 场景树的 Remote 模式：编辑器经 `EngineDebugger` 发送 `vecs:req_snapshot`，游戏用新的 `VECSWorld.get_snapshot_data()` 回发 `vecs:snapshot`。提供“刷新”按钮与可选 ~1Hz 自动刷新；快照仅按需发送。
 - **`VECSWorld.get_snapshot_data()`** —— 返回世界的可 JSON 化 Dictionary（`stats` / `components` / `systems` / `entities`）；供编辑器选项卡使用。实体表按 `vortarisecs/general/max_snapshot_entities`（默认 500）截断并带 `truncated` / `entity_total` 标志，避免 10 万实体的世界每次刷新都序列化出 MB 级数据；经 `serialize_snapshot_json()` 写存档时永不截断。
@@ -85,6 +85,28 @@ VECSNetworkSync（Node，RPC）      ──────────► VECSSyncS
 ```
 
 > 注：二进制/JSON 快照序列化都在 `VECSWorld` 上（`serialize_snapshot()` / `serialize_snapshot_json()` 及其 `deserialize_*` 对应方法），映射到内部的 `vortaris::BinaryBuffer` / snapshot 编解码器——**不存在** `VECSBinaryBuffer` 类。
+
+## 核心 API 总览
+
+你在 GDScript 中接触到的都是 `VECS` 前缀类；C++ 核心（`vortaris::`）保持隐藏。这是一张心智地图：
+
+| 类 | 职责 | 最常用的入口 |
+|---|---|---|
+| `VECSWorld` | 世界：拥有全部实体、组件注册表、查询缓存与系统调度器 | `VECS.get_world()`、`create_entity`、`create_with_components`、`spawn`、`register_component`、`query`、`each`、`commands`、`process`、`serialize_*` / `deserialize_*` |
+| `VECSEntity` | 单个实体的轻量句柄（槽位 + 代数打包进 64 位 id） | `add_component`、`get_component`、`has_component`、`getf` / `setf`、`getf_int` / `getf_float` / `getf_bool` / `getf_string` / `getf_vector`、`is_alive`、`get_id` |
+| `VECSComponent` | 实体上某个组件实例的字段级访问器 | `get_field`、`set_field`、`get_int` / `get_float` / `get_bool` / `get_string` / `get_vector`、`get_fields`、`field_contains` |
+| `VECSQueryBuilder` | 流畅链式查询 | `with_all` / `with_any` / `with_none`、`changed`、`enabled`、`field_equals`、`where`、`order_by`、`order_by_id`，以 `execute` / `execute_one` / `count` 结束 |
+| `VECSCommandBuffer` | 延迟结构性变更（可在迭代内使用） | `add_component`、`remove_component`、`remove_entity`、`flush` |
+| `VECSSystem` | 游戏逻辑基类 | GDScript：覆写 `_script_process`；C++：覆写 `_setup` / `_tick` / `_deps` |
+| `VECSObserver` | 对组件事件做出响应式反应 | `set_callback`、`on_added` / `on_removed` / `on_changed` / `on_matched` / `on_unmatched` / `on_custom`、`set_components`、`set_fields`、`set_throttle_tick` |
+| `VECSComponentType` | 已注册组件类型的不可变 schema 元数据 | `get_field_names`、`get_field_type`、`get_field_count`、`get_size`、`get_id` |
+| `VECSNetworkSync` | 网络中枢：把世界绑定到同步策略 | `bind_world`、`set_server`、`set_strategy`、`tick`、`set_direct_peer` |
+| `VECSSnapshotReplication` | 默认的服务器权威复制策略 | `reconciliation_interval` |
+
+两种惯用法随处可见：
+
+- **便捷语法 vs 灵活层。** `spawn`、`each`、`getf`/`setf`、`find_by_components` 与世界级 `get_field`/`set_field` 都是灵活 API 的薄封装。简单场景用便捷语法；需要显式控制时降到灵活层（`query()`、`commands()`、`get_component` + 类型化 getter、C++ `for_each`）。
+- **类型化访问免去强转。** `int(comp.get_field("hp"))` 变成 `comp.get_int("hp")`；`float(e.getf("Health", "amount"))` 变成 `e.getf_float("Health", "amount")`。类型化 getter 同时存在于 `VECSComponent`（`get_int` / `get_float` / `get_bool` / `get_string` / `get_vector`）与 `VECSEntity`（`getf_int` / `getf_float` / `getf_bool` / `getf_string` / `getf_vector`）。
 
 ## 构建（Windows / MSVC）
 
@@ -146,6 +168,32 @@ var hits: Array = world.query() \
     .with_all(["Position", "Velocity"]) \
     .enabled() \
     .execute()
+```
+
+### 常见 0.3.1 模式的一行写法
+
+```gdscript
+# 类型化字段访问——无需 int()/float()/bool()/str() 强转。
+var hp: float = e.getf_float("Health", "amount")     # e: VECSEntity
+var lvl: int   = e.get_component("Combatant").get_int("level")
+
+# “找到我拥有的所有实体”——一条过滤查询，比较在 C++ 侧完成。
+var owned: Array = world.query() \
+    .with_all(["Combatant"]) \
+    .field_equals("Combatant", "owner", eid) \
+    .execute()
+
+# 生成 + 加组件，缺失字段按 schema 默认值填充。
+var unit: VECSEntity = world.create_with_components(0, {"Combatant": {"hp": 30.0}})
+
+# 事件驱动，替代每帧轮询。
+var obs: VECSObserver = world.on_changed("Combatant", {
+    "fields": ["hp"],
+    "callable": func(_ev: int, ent: VECSEntity, _p: Variant) -> void: print(ent.get_id()),
+})
+
+# 数组成员判断一次完成。
+if e.get_component("Tags").field_contains("tags", "burning"): ...
 ```
 
 ## 脚本定义组件与系统（无需 C++）
@@ -242,6 +290,20 @@ w.for_each<Position>([&](vortaris::Entity e, Position &pos) {
 
 框架会强制执行：迭代期间发起结构性变更会被**报错拒绝**，而不是静默破坏迭代（过去会导致随机跳过 / 读到过期行）。
 
+## 最佳实践与常见问题
+
+- **迭代期间绝不发起结构性变更。** `for_each`、`View::each` 与 `world.each()` 正在遍历存活的 archetype 行；循环中途增删组件或销毁实体会让行在遍历器脚下移动。把它们延迟到 `world.commands()` 并统一 flush（框架会**报错拒绝**循环内的结构性变更）。循环内读写组件*值*始终没问题。
+- **“owner 外键”查询 → `field_equals`。** 不要 `query().with_all(["Combatant"]).execute()` 后再遍历每个结果手比 `owner` 字段；改在 C++ 侧过滤：`query().with_all(["Combatant"]).field_equals("Combatant", "owner", eid).execute()`。
+- **用观察者替代每帧轮询。** 每帧读 `hp` 的 UI 可以改为订阅：`world.on_changed("Combatant", {"fields": ["hp"], "callable": cb})` 只在 `hp` 真正变化时触发。`set_throttle_tick` 可确定性节流高频率写入的 CHANGED 派发。
+- **稀疏生成 → `create_with_components`。** `world.create_with_components(def_id, {"Health": {"amount": 75}})` 缺失字段按 schema 默认值填充，你只需写关心的字段。`def_id <= 0` 自动分配 id；正数 `def_id` 预分配该 id。
+- **空句柄就是“找不到”的答案。** `VECSEntity.get_component`、`VECSWorld.entity(id)`、`VECSWorld.get_component_type` 在对象不存在时返回**空句柄**（绝不是无效包装）——用 `== null` 判断。
+- **读取时的默认值。** `get_field` / `getf` / `VECSComponent.get_field` 接受 `default` Variant（默认 null），在组件/字段缺失时返回。请用真实值，不要用魔法哨兵。
+- **数组成员判断 → `field_contains`。** `comp.field_contains("tags", value)` 一次调用判断标量或任一数组元素——无需手工重建数组再扫描。
+- **大型世界。** 优先用 `world.each(comps, callable)` 或 C++ `for_each`，而不是 `query().execute()`（会物化 Array）。大型存档用二进制 `serialize_snapshot()`；JSON 方便但较慢。编辑器远程监控的实体表受 `vortarisecs/general/max_snapshot_entities` 限制，10 万实体的世界也能保持有界。
+- **池化 id 保持有效。** `create_entity_pooled` / `destroy_entity_pooled` 回收槽位但**不** bump 代数，因此在池化销毁前捕获的过期句柄在槽位复用后仍有效。文档注明的取舍——不要把它与基于代数的假设混用。
+- **快照加载不是“死亡”。** 读档或应用网络全量状态会替换世界，但**不会**派发 REMOVED 观察者。
+- **变更跟踪是惰性的。** 列在首次使用 `changed()` 时才开启版本跟踪，并把既有行盖成当前 tick，因此第一次遍历会报告一次。`.changed()` 基线按查询分别跟踪，过滤器互不干扰。
+
 ## JSON 存档与数据表
 
 与 Godot 自带的 `JSON` 类深度集成——传入/传出普通的 `Dictionary` / `Array` / `String`，用引擎负责 stringify/parse：
@@ -287,6 +349,65 @@ server_ns.tick(delta)                    # 服务器每帧调用
 ```
 
 组件自动联网：至少含一个联网组件（默认）的实体会被生成（spawn），其脏字段作为增量（delta）推送，被销毁的实体取消生成（despawn）。定期对账广播全量状态（反幽灵）。
+
+## 编辑器远程监控（调试器 “ECS” 选项卡）
+
+游戏运行时，编辑器调试器底部面板新增 **“ECS”** 选项卡，实时显示**运行中**游戏的 ECS 世界——相当于 Godot 场景树 Remote 模式的 ECS 版。它基于 `EngineDebugger`，因此**请用编辑器 F5 启动游戏**；独立/headless 运行没有附加的调试器（请改用 headless CLI、runtime overlay 或 MCP——见 `docs/AI_DEBUGGING.md`）。
+
+### 步骤
+
+1. 在编辑器中按 **F5** 运行游戏（须附加调试会话）。
+2. 打开底部 **Debugger** 面板，切换到 **ECS** 选项卡。
+3. 点击 **Refresh** 拉取一次快照，或保持 **“Auto refresh (1s)”** 开启（间隔来自 `vortarisecs/debug/auto_refresh_interval`）。
+4. 浏览下面四个页面。快照**仅按需发送**——游戏从不逐帧推送。
+
+### 四个页面
+
+| 页面 | 显示内容 |
+|---|---|
+| **Entities** | 实体 id → 组件 → 字段 = 值。受 `vortarisecs/general/max_snapshot_entities`（默认 500）限制；截断时显示 `truncated (N/total)` 提示。 |
+| **Components** | 每个已注册组件类型：名称、大小，以及逐字段 type / count / sync / networked。 |
+| **Systems** | 每个已注册系统：名称、分组、active / paused、tick_interval、flush_mode。 |
+| **Stats** | `get_debug_stats()`：实体 / archetype / 组件 / 观察者数量、change_tick、池大小、查询缓存条目。 |
+
+### 实时改字段值
+
+双击 Entities 页面任一 **Value** 单元格，输入新值并回车。编辑器向游戏发送 `vecs:set_field`，游戏经 `VECSWorld.debug_set_field()` 应用。游戏会先**做类型检查**：值类型与字段不匹配时（例如把 `Vector3` 填进 `F32` 单元格）会在状态栏报错拒绝，而不是静默把字段清零。
+
+### 搜索 / 过滤 / 排序
+
+- 每个页面都有搜索框，输入即时过滤，清空恢复全部。Entities 搜索额外有**模式下拉框**：**Mixed**（id + 组件 + 值子串）、**By value**（字段值；支持 `comp/field == value`）、**By component**（仅名称）与 **Fuzzy**（宽松子序列匹配）。
+- Entities 页面还有 **Filter…** 按钮，打开带 **All / Any** 模式的组件选择器——只显示携带所选组件的实体。它与文本搜索取交（AND）。
+- 点击**列标题**可对该页行排序（升/降序切换，以 `↑` / `↓` 显示）。展开/折叠状态在刷新、排序与过滤后都保留。
+
+### 线上协议
+
+扩展在非编辑器进程中自动注册 `EngineDebugger` 消息捕获（前缀 `vecs`）——无需任何 demo 代码：
+
+| 通道 | 方向 | 数据 |
+|---|---|---|
+| `vecs:req_snapshot` | 编辑器 → 游戏 | `[]` |
+| `vecs:snapshot` | 游戏 → 编辑器 | `[ <snapshot Dictionary> ]` |
+| `vecs:set_field` | 编辑器 → 游戏 | `[entity_id, comp, field, value]` |
+| `vecs:set_field_result` | 游戏 → 编辑器 | `[ok, entity_id, comp, field, error]` |
+
+快照 Dictionary 由 `VECSWorld.get_snapshot_data()` 构建：`{ "protocol", "version", "stats", "components", "systems", "entities" }`。
+
+> 单独的编辑器**检查器 dock**（`addons/vortarisecs/editor/ecs_inspector_dock.gd`）查看的是*编辑器*进程的世界，在游戏运行时为空。查看运行中游戏请用调试器 **ECS** 选项卡（或 runtime overlay / headless CLI / MCP）。
+
+## 设置参考
+
+所有设置都在 **项目设置 > VortarisECS** 下（层级化的 `vortarisecs/<分类>/<名称>` 路径）。默认值仅在缺失时写入，绝不覆盖你已设置的值。0.3.0 的旧扁平路径 `vortarisecs/verbose` 仍作为 `vortarisecs/general/verbose` 的回退兼容。
+
+| 设置 | 默认值 | 作用 |
+|---|---|---|
+| `vortarisecs/general/verbose` | `false` | 分级 verbose 日志（`[vortarisecs][v] …` 追踪：实体生灭、组件写入、observer 派发、网络包、query 执行）。仅 debug 构建；release 构建编译为空。`VECSWorld.set_verbose()` / `is_verbose()` 读写它。 |
+| `vortarisecs/general/auto_shutdown_on_exit` | `true` | 扩展卸载时调用 `VECSWorld.shutdown()`，干净退出、无警告/泄漏。 |
+| `vortarisecs/general/max_snapshot_entities` | `500` | 编辑器远程 ECS 监控的实体上限（`get_snapshot_data()` / `entities_to_data(max)`）。存档序列化永不截断。 |
+| `vortarisecs/debug/auto_refresh_interval` | `1.0` 秒 | 编辑器 “ECS” 调试选项卡的自动刷新间隔。 |
+| `vortarisecs/network/default_sync_priority` | `2`（Medium） | 从 GDScript 注册字段的默认同步档位。取值：`0` Realtime（每 tick）、`1` High（20 Hz）、`2` Medium（10 Hz）、`3` Low（2 Hz）、`4` SpawnOnly（仅在生成包内一次）、`5` Local（永不联网）。 |
+| `vortarisecs/observer/default_throttle_tick` | `0` | 新建观察者 CHANGED 派发的默认变更时钟节流。`0` = 关闭。 |
+| `vortarisecs/serialization/compact_json` | `false` | `true` = `serialize_snapshot_json_string()` 输出紧凑（无缩进）JSON；`false` = 制表符缩进的格式化 JSON。 |
 
 ## 性能（Windows x64，10 万实体）
 

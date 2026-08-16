@@ -71,7 +71,7 @@ hand-rolled spawns, per-frame UI polling):
 - **`VECSWorld.is_verbose()`** now reports the persisted setting (with legacy
   fallback) rather than an init-time snapshot.
 
-## What's new in 0.3.0
+## What's new in 0.3.0 (runtime remote monitoring)
 
 - **Runtime remote monitoring GUI** — while a game runs, the editor's debugger
   bottom panel gets an **"ECS"** tab that shows the *running* game's live world:
@@ -150,6 +150,38 @@ VECSNetworkSync (Node, RPC)          ──────────► VECSSyncS
 > `vortaris::BinaryBuffer` / snapshot codec — there is **no** `VECSBinaryBuffer`
 > class.
 
+## Core API overview
+
+Everything you touch from GDScript is a `VECS`-prefixed class; the C++ core
+(`vortaris::`) stays hidden. This is the mental map:
+
+| Class | Role | Most-used entry points |
+|---|---|---|
+| `VECSWorld` | The world: owns every entity, the component registry, the query cache and the system scheduler | `VECS.get_world()`, `create_entity`, `create_with_components`, `spawn`, `register_component`, `query`, `each`, `commands`, `process`, `serialize_*` / `deserialize_*` |
+| `VECSEntity` | Lightweight handle to one entity (slot + generation packed into a 64-bit id) | `add_component`, `get_component`, `has_component`, `getf` / `setf`, `getf_int` / `getf_float` / `getf_bool` / `getf_string` / `getf_vector`, `is_alive`, `get_id` |
+| `VECSComponent` | Field-level accessor for one component instance on an entity | `get_field`, `set_field`, `get_int` / `get_float` / `get_bool` / `get_string` / `get_vector`, `get_fields`, `field_contains` |
+| `VECSQueryBuilder` | Fluent, chainable query | `with_all` / `with_any` / `with_none`, `changed`, `enabled`, `field_equals`, `where`, `order_by`, `order_by_id`, terminated by `execute` / `execute_one` / `count` |
+| `VECSCommandBuffer` | Deferred structural changes (allowed inside iteration) | `add_component`, `remove_component`, `remove_entity`, `flush` |
+| `VECSSystem` | Base class for game logic | GDScript: override `_script_process`; C++: override `_setup` / `_tick` / `_deps` |
+| `VECSObserver` | Event-driven reactions to component events | `set_callback`, `on_added` / `on_removed` / `on_changed` / `on_matched` / `on_unmatched` / `on_custom`, `set_components`, `set_fields`, `set_throttle_tick` |
+| `VECSComponentType` | Immutable schema metadata for a registered component type | `get_field_names`, `get_field_type`, `get_field_count`, `get_size`, `get_id` |
+| `VECSNetworkSync` | Network coordinator: binds a world to a sync strategy | `bind_world`, `set_server`, `set_strategy`, `tick`, `set_direct_peer` |
+| `VECSSnapshotReplication` | Default server-authoritative replication strategy | `reconciliation_interval` |
+
+Two idioms show up everywhere:
+
+- **Convenience sugar vs. the flexible layer.** `spawn`, `each`, `getf`/`setf`,
+  `find_by_components` and the world-level `get_field`/`set_field` are thin
+  wrappers over the flexible APIs. Use the sugar for simple things; drop to the
+  flexible layer (`query()`, `commands()`, `get_component` + typed getters, C++
+  `for_each`) when you need explicit control.
+- **Typed access kills the casts.** `int(comp.get_field("hp"))` becomes
+  `comp.get_int("hp")`; `float(e.getf("Health", "amount"))` becomes
+  `e.getf_float("Health", "amount")`. The typed getters exist on both
+  `VECSComponent` (`get_int` / `get_float` / `get_bool` / `get_string` /
+  `get_vector`) and `VECSEntity` (`getf_int` / `getf_float` / `getf_bool` /
+  `getf_string` / `getf_vector`).
+
 ## Build (Windows / MSVC)
 
 The plugin links against **godot-cpp** (external dependency). Get it first (must target Godot 4.7):
@@ -225,6 +257,32 @@ var hits: Array = world.query() \
     .with_all(["Position", "Velocity"]) \
     .enabled() \
     .execute()
+```
+
+### One-liners for the common 0.3.1 patterns
+
+```gdscript
+# Typed field access — no int()/float()/bool()/str() casts.
+var hp: float = e.getf_float("Health", "amount")     # e: VECSEntity
+var lvl: int   = e.get_component("Combatant").get_int("level")
+
+# "Find everything owned by me" — one filtered query, comparison in C++.
+var owned: Array = world.query() \
+    .with_all(["Combatant"]) \
+    .field_equals("Combatant", "owner", eid) \
+    .execute()
+
+# Spawn + add components, filling absent fields with schema defaults.
+var unit: VECSEntity = world.create_with_components(0, {"Combatant": {"hp": 30.0}})
+
+# Event-driven instead of per-frame polling.
+var obs: VECSObserver = world.on_changed("Combatant", {
+    "fields": ["hp"],
+    "callable": func(_ev: int, ent: VECSEntity, _p: Variant) -> void: print(ent.get_id()),
+})
+
+# Array membership in one call.
+if e.get_component("Tags").field_contains("tags", "burning"): ...
 ```
 
 ## Script-defined components & systems (no C++)
@@ -339,6 +397,50 @@ The framework enforces this: a structural change issued during iteration is
 rejected with an error instead of silently corrupting the iteration (it used to
 cause random skips / stale reads).
 
+## Best practices & common pitfalls
+
+- **Never issue structural changes inside iteration.** `for_each`, `View::each`
+  and `world.each()` walk live archetype rows; adding/removing a component or
+  destroying an entity mid-loop moves rows under the walker. Defer them to
+  `world.commands()` and flush once (the framework **rejects** in-loop
+  structural changes with a loud error). Reading/writing component *values* in a
+  loop is always fine.
+- **"Owner foreign key" lookups → `field_equals`.** Instead of
+  `query().with_all(["Combatant"]).execute()` then scanning every result to
+  hand-compare the `owner` field, filter in C++:
+  `query().with_all(["Combatant"]).field_equals("Combatant", "owner", eid).execute()`.
+- **Replace per-frame polling with observers.** A UI that reads `hp` every frame
+  can subscribe instead: `world.on_changed("Combatant", {"fields": ["hp"],
+  "callable": cb})` fires only when `hp` actually changed. A `set_throttle_tick`
+  caps CHANGED delivery deterministically for high-frequency writes.
+- **Sparse spawns → `create_with_components`.** `world.create_with_components(
+  def_id, {"Health": {"amount": 75}})` fills absent fields with their schema
+  default, so you only write the fields you care about. `def_id <= 0`
+  auto-assigns the id; a positive `def_id` preassigns it.
+- **Null handles are the "not found" answer.** `VECSEntity.get_component`,
+  `VECSWorld.entity(id)`, `VECSWorld.get_component_type` return a **null handle**
+  (never an invalid wrapper) when the thing is missing — test with `== null`.
+- **Default values on reads.** `get_field` / `getf` / `VECSComponent.get_field`
+  take a `default` Variant (null by default) returned when the component/field is
+  missing. Use a real value, not a magic sentinel.
+- **Array membership → `field_contains`.** `comp.field_contains("tags", value)`
+  checks a scalar or any array element in one call — no manual rebuild + scan.
+- **Large worlds.** Prefer `world.each(comps, callable)` or C++ `for_each` over
+  `query().execute()` (which materializes an Array). Use the binary
+  `serialize_snapshot()` for big saves; JSON is convenient but slower. The
+  editor's remote monitor caps its entity table at
+  `vortarisecs/general/max_snapshot_entities`, so a 100k-entity world stays
+  bounded.
+- **Pooled ids stay valid.** `create_entity_pooled` / `destroy_entity_pooled`
+  recycle a slot **without** bumping the generation, so a stale handle captured
+  before a pooled destroy stays valid if the slot is reused. Documented
+  trade-off — don't combine pooling with generation-based assumptions.
+- **Snapshot load is not "death".** Loading a save or applying a network
+  full-state replaces the world and does **not** dispatch REMOVED observers.
+- **Change tracking is lazy.** A column starts tracking versions on first
+  `changed()` use and stamps pre-existing rows, so the first pass reports them
+  once. `.changed()` baselines are tracked per query, so filters don't interfere.
+
 ## JSON saves & data tables
 
 Deeply integrated with Godot's own `JSON` class — pass in/out plain
@@ -388,6 +490,90 @@ server_ns.tick(delta)                    # call each frame on the server
 ```
 
 Components are networked automatically: entities with at least one networked component (the default) are spawned, their dirty fields are pushed as deltas, and destroyed entities are despawned. Periodic reconciliation broadcasts a full state (anti-ghost).
+
+## Editor remote monitor (debugger "ECS" tab)
+
+While a game runs, the editor's debugger bottom panel gets an **"ECS"** tab that
+shows the *running* game's live world — the ECS equivalent of Godot's Scene-tree
+Remote mode. It works over `EngineDebugger`, so **start the game from the editor
+with F5**; a standalone/headless run has no attached debugger (use the headless
+CLI, the runtime overlay or MCP instead — see `docs/AI_DEBUGGING.md`).
+
+### Steps
+
+1. Press **F5** in the editor to run the game (a debug session must attach).
+2. Open the bottom **Debugger** panel and switch to the **ECS** tab.
+3. Click **Refresh** to pull one snapshot, or leave **"Auto refresh (1s)"** on
+   (interval comes from `vortarisecs/debug/auto_refresh_interval`).
+4. Browse the four pages below. Snapshots are **on-demand only** — the game never
+   streams them every frame.
+
+### The four pages
+
+| Page | Shows |
+|---|---|
+| **Entities** | Entity id → component → field = value. Capped at `vortarisecs/general/max_snapshot_entities` (default 500); a `truncated (N/total)` note appears when the cap cut the list. |
+| **Components** | Every registered component type: name, size, and per-field type / count / sync / networked. |
+| **Systems** | Every registered system: name, group, active / paused, tick_interval, flush_mode. |
+| **Stats** | `get_debug_stats()`: entity / archetype / component / observer counts, change_tick, pool size, query-cache entries. |
+
+### Live field editing
+
+Double-click any **Value** cell on the Entities page, type a new value and press
+Enter. The editor sends `vecs:set_field` to the game, which applies it through
+`VECSWorld.debug_set_field()`. The game **type-checks** the edit first: a value
+whose Variant type does not match the field (e.g. a `Vector3` typed into an `F32`
+cell) is rejected with a status-bar message instead of silently zeroing the field.
+
+### Search, filter and sort
+
+- Every page has a search box; typing filters immediately, clearing restores all.
+  The Entities search adds a **mode dropdown**: **Mixed** (id + component +
+  value substring), **By value** (field values; supports `comp/field == value`),
+  **By component** (names only) and **Fuzzy** (loose subsequence matching).
+- The Entities page also has a **Filter…** button that opens a component picker
+  with an **All / Any** mode — show only entities that carry the selected
+  components. It combines (AND) with the text search.
+- Click a **column header** to sort that page's rows (ascending / descending
+  toggle shown as `↑` / `↓`). Expanded/collapsed state survives refresh, sort and
+  filter.
+
+### Wire protocol
+
+The extension registers an `EngineDebugger` message capture (prefix `vecs`) in
+non-editor processes automatically — no demo code required:
+
+| Channel | Direction | Data |
+|---|---|---|
+| `vecs:req_snapshot` | editor → game | `[]` |
+| `vecs:snapshot` | game → editor | `[ <snapshot Dictionary> ]` |
+| `vecs:set_field` | editor → game | `[entity_id, comp, field, value]` |
+| `vecs:set_field_result` | game → editor | `[ok, entity_id, comp, field, error]` |
+
+The snapshot Dictionary is built by `VECSWorld.get_snapshot_data()`:
+`{ "protocol", "version", "stats", "components", "systems", "entities" }`.
+
+> The separate editor **inspector dock**
+> (`addons/vortarisecs/editor/ecs_inspector_dock.gd`) inspects the *editor*
+> process's world, which is empty in a running game. For the live game use the
+> debugger **ECS** tab (or the runtime overlay / headless CLI / MCP).
+
+## Settings reference
+
+All settings live under **Project Settings > VortarisECS** (the hierarchical
+`vortarisecs/<category>/<name>` paths). Defaults are seeded only when absent, so
+a value you set is never clobbered. The legacy flat `vortarisecs/verbose`
+(0.3.0) is still honored as a fallback for `vortarisecs/general/verbose`.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `vortarisecs/general/verbose` | `false` | Tiered verbose logging (`[vortarisecs][v] …` traces: entity birth/death, component writes, observer dispatch, network packets, query execution). Debug builds only; release builds compile it out. `VECSWorld.set_verbose()` / `is_verbose()` read and write it. |
+| `vortarisecs/general/auto_shutdown_on_exit` | `true` | Calls `VECSWorld.shutdown()` when the extension unloads, for a clean exit with no warnings/leaks. |
+| `vortarisecs/general/max_snapshot_entities` | `500` | Entity cap for the editor's remote ECS monitor (`get_snapshot_data()` / `entities_to_data(max)`). Save-file serialization is never capped. |
+| `vortarisecs/debug/auto_refresh_interval` | `1.0` s | Auto-refresh interval of the editor "ECS" debugger tab. |
+| `vortarisecs/network/default_sync_priority` | `2` (Medium) | Default sync tier for fields registered from GDScript. Values: `0` Realtime (every tick), `1` High (20 Hz), `2` Medium (10 Hz), `3` Low (2 Hz), `4` SpawnOnly (once in the spawn packet), `5` Local (never networked). |
+| `vortarisecs/observer/default_throttle_tick` | `0` | Default change-clock throttle for new observers' CHANGED delivery. `0` = off. |
+| `vortarisecs/serialization/compact_json` | `false` | `true` = compact (unindented) JSON from `serialize_snapshot_json_string()`; `false` = pretty-printed with tab indentation. |
 
 ## Performance (Windows x64, 100k entities)
 

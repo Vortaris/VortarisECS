@@ -98,6 +98,17 @@
 			<description>
 				One-call observer factory (0.3.1): creates a [VECSObserver], wires [param callable] as its callback, configures it from [param opts], and registers it with this world. The callback signature is [code]func(event: int, entity: VECSEntity, payload: Variant) -> void[/code] ([code]event[/code] is a [enum VECSObserver.Event] constant). Since 0.3.1 [VECSObserver] is a concrete class, so this replaces the old subclass-or-nothing observer usage.
 
+				[codeblock]
+				var obs: VECSObserver = world.create_observer(
+				    func(event: int, entity: VECSEntity, payload: Variant) -> void:
+				        print("event=", event, " entity=", entity.get_id()),
+				    {"events": "changed", "components": ["Combatant"], "fields": ["hp"]},
+				)
+				# Later, when done (the caller owns the node):
+				world.remove_observer(obs)
+				obs.free()
+				[/codeblock]
+
 				[param opts] keys (all optional):
 				- [code]"events"[/code]: an int bitmask of [enum VECSObserver.Event], or an [Array] of names ([code]"added"[/code], [code]"removed"[/code], [code]"changed"[/code], [code]"matched"[/code], [code]"unmatched"[/code], [code]"custom"[/code]). Default: CHANGED.
 				- [code]"components"[/code]: [Array] of component names the observer watches (default: every component).
@@ -130,7 +141,41 @@
 			<description>
 				Creates an entity (optionally with a preassigned id) and adds every component in [param components] in one call — a merge of [method create_entity] / [method create_entity_preassigned] + [method VECSEntity.add_component]. [param def_id] [code]&lt;= 0[/code] auto-assigns the id; a positive [param def_id] preassigns it (CHANT's "row to component dict" spawn helpers collapse to this). Absent component fields are filled with their schema default (zero / empty string / false / zeroed array slots), so callers only supply the fields they care about. Returns a handle to the new entity, or a null handle if creation failed (an unregistered component or an id conflict — nothing is left half-spawned).
 
+				[codeblock]
+				# Register a schema-only component first (types are F32 / I32 / I64 / ...).
+				world.register_component("Combatant", [
+				    {"name": "hp", "type": "F32"},
+				    {"name": "level", "type": "I32"},
+				    {"name": "owner", "type": "I64"},
+				])
+				# Spawn + add in one call; level and owner get schema defaults (0).
+				var unit: VECSEntity = world.create_with_components(0, {"Combatant": {"hp": 30.0}})
+				# Positive def_id preassigns that id (for save/network-id stability).
+				var restored: VECSEntity = world.create_with_components(42, {"Combatant": {"hp": 100.0}})
+				[/codeblock]
+
 				一次调用创建实体（可选预分配 id）并添加 [param components] 中的所有组件——是 [method create_entity] / [method create_entity_preassigned] + [method VECSEntity.add_component] 的合并。[param def_id] [code]&lt;= 0[/code] 自动分配 id；正数 [param def_id] 预分配它（CHANT 的"行到组件字典"生成可收缩为这一调用）。缺失的组件字段按 schema 默认值填充（零 / 空串 / false / 归零数组槽位），因此调用方只需提供关心的字段。返回新实体句柄；创建失败（组件未注册或 id 冲突——不会留下半生成的实体）返回空句柄。
+			</description>
+		</method>
+		<method name="debug_set_field">
+			<return type="Dictionary" />
+			<param index="0" name="entity_id" type="int" />
+			<param index="1" name="comp" type="String" />
+			<param index="2" name="field" type="String" />
+			<param index="3" name="value" type="Variant" />
+			<description>
+				Runtime-debug write: validates that the entity is alive, the component is attached, the field exists AND that [param value]'s Variant type matches the field's expected type, then applies it through the same schema-driven conversion as [method VECSComponent.set_field]. A type mismatch is rejected with [code]{"ok": false, "error": "type mismatch ..."}[/code] instead of being silently coerced to a zero value by Godot's Variant-to-type conversion. Returns [code]{"ok": bool, "error": String}[/code]; [code]error[/code] is empty on success. This is the game-side handler behind the editor's "ECS" debugger tab live value editing (channel [code]"vecs:set_field"[/code]); it performs no structural changes and is safe to call on a running world.
+
+				[codeblock]
+				# Same code path the editor's live value edit uses. A type mismatch is
+				# rejected instead of silently zeroing the field.
+				var good := world.debug_set_field(eid, "Combatant", "hp", 42.0)
+				# → {"ok": true, "error": ""}
+				var bad := world.debug_set_field(eid, "Combatant", "hp", "not a float")
+				# → {"ok": false, "error": "type mismatch for field 'hp' (expected Float, got String)"}
+				[/codeblock]
+
+				运行时调试写入：校验实体存活、组件已挂载、字段存在，且 [param value] 的 Variant 类型与字段期望类型一致，然后通过与 [method VECSComponent.set_field] 相同的 schema 驱动转换应用该值。类型不匹配时返回 [code]{"ok": false, "error": "type mismatch ..."}[/code]，而不是被 Godot 的 Variant→类型转换静默地写成零值。返回 [code]{"ok": bool, "error": String}[/code]；成功时 [code]error[/code] 为空。这是编辑器 “ECS” 调试选项卡实时改值（通道 [code]"vecs:set_field"[/code]）背后的游戏侧处理；它不进行任何结构性修改，可安全地在运行中的世界上调用。
 			</description>
 		</method>
 		<method name="deserialize_snapshot">
@@ -271,18 +316,6 @@
 				返回一个可 JSON 化的 [Dictionary]，用于编辑器的远程 ECS 监视器，描述整个世界：[code]{"protocol", "version", "stats", "components", "systems", "entities"}[/code]。[code]stats[/code] 与 [method get_debug_stats] 相同；[code]components[/code] 列出每个已注册组件类型（name、id、size，以及 [code]fields[/code] 数组，含 name/type/count/sync_priority/networked）；[code]systems[/code] 列出每个已注册系统（name/group/active/paused/tick_interval/flush_mode）；[code]entities[/code] 与 [method entities_to_data] 相同，但按 [code]vortarisecs/general/max_snapshot_entities[/code]（默认 500）截断，避免大世界每次自动刷新都序列化出 MB 级数据——截断发生时字典额外带有 [code]"truncated": true[/code] 与 [code]"entity_total"[/code]（真实实体总数）。游戏侧消息捕获经 EngineDebugger 通道（前缀 [code]"vecs"[/code]）按需发送给编辑器。每帧构建完整实体表代价高昂，请按需请求（见编辑器 “ECS” 调试选项卡）。
 			</description>
 		</method>
-		<method name="debug_set_field">
-			<return type="Dictionary" />
-			<param index="0" name="entity_id" type="int" />
-			<param index="1" name="comp" type="String" />
-			<param index="2" name="field" type="String" />
-			<param index="3" name="value" type="Variant" />
-			<description>
-				Runtime-debug write: validates that the entity is alive, the component is attached, the field exists AND that [param value]'s Variant type matches the field's expected type, then applies it through the same schema-driven conversion as [method VECSComponent.set_field]. A type mismatch is rejected with [code]{"ok": false, "error": "type mismatch ..."}[/code] instead of being silently coerced to a zero value by Godot's Variant-to-type conversion. Returns [code]{"ok": bool, "error": String}[/code]; [code]error[/code] is empty on success. This is the game-side handler behind the editor's "ECS" debugger tab live value editing (channel [code]"vecs:set_field"[/code]); it performs no structural changes and is safe to call on a running world.
-
-				运行时调试写入：校验实体存活、组件已挂载、字段存在，且 [param value] 的 Variant 类型与字段期望类型一致，然后通过与 [method VECSComponent.set_field] 相同的 schema 驱动转换应用该值。类型不匹配时返回 [code]{"ok": false, "error": "type mismatch ..."}[/code]，而不是被 Godot 的 Variant→类型转换静默地写成零值。返回 [code]{"ok": bool, "error": String}[/code]；成功时 [code]error[/code] 为空。这是编辑器 “ECS” 调试选项卡实时改值（通道 [code]"vecs:set_field"[/code]）背后的游戏侧处理；它不进行任何结构性修改，可安全地在运行中的世界上调用。
-			</description>
-		</method>
 		<method name="get_world">
 			<return type="VECSWorld" />
 			<description>
@@ -307,6 +340,14 @@
 				Returns [code]true[/code] if [param entity] refers to a live entity in this world. Stale handles (from a destroyed or recycled entity) return [code]false[/code].
 
 				若 [param entity] 指向本世界中的一个存活实体则返回 [code]true[/code]。过期句柄（来自已销毁或已回收的实体）返回 [code]false[/code]。
+			</description>
+		</method>
+		<method name="is_verbose" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] when detailed verbose logging is active for this process (debug build AND the [code]vortarisecs/general/verbose[/code] project setting, which falls back to the legacy [code]vortarisecs/verbose[/code] path from 0.3.0). Reading this also re-syncs the internal logging cache with the persisted setting, so the reported state always agrees with what the verbose logs actually emit (a direct [method ProjectSettings.set_setting] write is picked up here). In release builds this always returns [code]false[/code].
+
+				返回当前进程是否启用了详细 verbose 日志（debug 构建且 [code]vortarisecs/general/verbose[/code] 项目设置为真，并回退兼容 0.3.0 的旧 [code]vortarisecs/verbose[/code] 路径）。读取该方法还会把内部日志缓存与持久化设置重新同步，因此报告的状态始终与 verbose 日志实际输出一致（此处会捕获直接调用 [method ProjectSettings.set_setting] 的写入）。release 构建恒返回 [code]false[/code]。
 			</description>
 		</method>
 		<method name="merge_world">
@@ -457,14 +498,6 @@
 				Serializes the whole world as a JSON [String] ready to write to a save file. Honors the [code]vortarisecs/serialization/compact_json[/code] project setting: [code]true[/code] writes compact (unindented) JSON, [code]false[/code] writes pretty-printed JSON with tab indentation.
 
 				把整个世界序列化为可直接写入存档文件的 JSON [String]。遵循 [code]vortarisecs/serialization/compact_json[/code] 项目设置：[code]true[/code] 输出紧凑（无缩进）JSON，[code]false[/code] 输出带制表符缩进的格式化 JSON。
-			</description>
-		</method>
-		<method name="is_verbose" qualifiers="const">
-			<return type="bool" />
-			<description>
-				Returns [code]true[/code] when detailed verbose logging is active for this process (debug build AND the [code]vortarisecs/general/verbose[/code] project setting, which falls back to the legacy [code]vortarisecs/verbose[/code] path from 0.3.0). Reading this also re-syncs the internal logging cache with the persisted setting, so the reported state always agrees with what the verbose logs actually emit (a direct [method ProjectSettings.set_setting] write is picked up here). In release builds this always returns [code]false[/code].
-
-				返回当前进程是否启用了详细 verbose 日志（debug 构建且 [code]vortarisecs/general/verbose[/code] 项目设置为真，并回退兼容 0.3.0 的旧 [code]vortarisecs/verbose[/code] 路径）。读取该方法还会把内部日志缓存与持久化设置重新同步，因此报告的状态始终与 verbose 日志实际输出一致（此处会捕获直接调用 [method ProjectSettings.set_setting] 的写入）。release 构建恒返回 [code]false[/code]。
 			</description>
 		</method>
 		<method name="set_entity_range">

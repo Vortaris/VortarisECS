@@ -39,15 +39,6 @@
 				按声明顺序返回该组件类型所有字段的名称。
 			</description>
 		</method>
-		<method name="get_field_type" qualifiers="const">
-			<return type="String" />
-			<param index="0" name="field" type="String" />
-			<description>
-				Returns the type name of the field [param field] as a [String] ([code]"F32"[/code], [code]"Vector3"[/code], ...). Array fields ([code]count &gt; 1[/code]) return [code]"Array:&lt;type&gt;"[/code]. Returns an empty string for unknown fields.
-
-				以 [String] 返回字段 [param field] 的类型名（[code]"F32"[/code]、[code]"Vector3"[/code] 等）。数组字段（[code]count &gt; 1[/code]）返回 [code]"Array:&lt;type&gt;"[/code]。未知字段返回空字符串。
-			</description>
-		</method>
 		<method name="get_field_sync_priority" qualifiers="const">
 			<return type="int" />
 			<param index="0" name="field" type="String" />
@@ -55,6 +46,15 @@
 				Returns the network sync priority of the field [param field]: [code]0[/code] realtime, [code]1[/code] high, [code]2[/code] medium, [code]3[/code] low, [code]4[/code] spawn-only, [code]5[/code] local (never networked).
 
 				返回字段 [param field] 的网络同步优先级：[code]0[/code] 实时、[code]1[/code] 高、[code]2[/code] 中、[code]3[/code] 低、[code]4[/code] 仅生成时发送、[code]5[/code] 本地（永不联网）。
+			</description>
+		</method>
+		<method name="get_field_type" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="field" type="String" />
+			<description>
+				Returns the type name of the field [param field] as a [String] ([code]"F32"[/code], [code]"Vector3"[/code], ...). Array fields ([code]count &gt; 1[/code]) return [code]"Array:&lt;type&gt;"[/code]. Returns an empty string for unknown fields.
+
+				以 [String] 返回字段 [param field] 的类型名（[code]"F32"[/code]、[code]"Vector3"[/code] 等）。数组字段（[code]count &gt; 1[/code]）返回 [code]"Array:&lt;type&gt;"[/code]。未知字段返回空字符串。
 			</description>
 		</method>
 		<method name="get_id" qualifiers="const">
