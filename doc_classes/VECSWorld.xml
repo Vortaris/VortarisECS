@@ -228,6 +228,18 @@
 				返回一个可 JSON 化的 [Dictionary]，用于编辑器的远程 ECS 监视器，描述整个世界：[code]{"protocol", "version", "stats", "components", "systems", "entities"}[/code]。[code]stats[/code] 与 [method get_debug_stats] 相同；[code]components[/code] 列出每个已注册组件类型（name、id、size，以及 [code]fields[/code] 数组，含 name/type/count/sync_priority/networked）；[code]systems[/code] 列出每个已注册系统（name/group/active/paused/tick_interval/flush_mode）；[code]entities[/code] 与 [method entities_to_data] 相同。游戏侧消息捕获经 EngineDebugger 通道（前缀 [code]"vecs"[/code]）按需发送给编辑器。每帧构建完整实体表代价高昂，请按需请求（见编辑器 “ECS” 调试选项卡）。
 			</description>
 		</method>
+		<method name="debug_set_field">
+			<return type="Dictionary" />
+			<param index="0" name="entity_id" type="int" />
+			<param index="1" name="comp" type="String" />
+			<param index="2" name="field" type="String" />
+			<param index="3" name="value" type="Variant" />
+			<description>
+				Runtime-debug write: validates that the entity is alive, the component is attached and the field exists, then applies [param value] through the same schema-driven conversion as [method VECSComponent.set_field]. Returns [code]{"ok": bool, "error": String}[/code]; [code]error[/code] is empty on success. This is the game-side handler behind the editor's "ECS" debugger tab live value editing (channel [code]"vecs:set_field"[/code]); it performs no structural changes and is safe to call on a running world.
+
+				运行时调试写入：校验实体存活、组件已挂载且字段存在，然后通过与 [method VECSComponent.set_field] 相同的 schema 驱动转换应用 [param value]。返回 [code]{"ok": bool, "error": String}[/code]；成功时 [code]error[/code] 为空。这是编辑器 “ECS” 调试选项卡实时改值（通道 [code]"vecs:set_field"[/code]）背后的游戏侧处理；它不进行任何结构性修改，可安全地在运行中的世界上调用。
+			</description>
+		</method>
 		<method name="get_world">
 			<return type="VECSWorld" />
 			<description>

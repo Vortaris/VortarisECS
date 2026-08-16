@@ -590,18 +590,107 @@ godot::Dictionary VECSWorld::get_snapshot_data() {
 	return out;
 }
 
-void VECSWorld::_debugger_capture(const godot::String &p_message, const godot::Variant &p_data) {
-	(void)p_data; // the request carries no payload
-	if (p_message != "req_snapshot") {
-		return;
+bool VECSWorld::_debugger_capture(const godot::String &p_message, const godot::Variant &p_data) {
+	if (p_message == "req_snapshot") {
+		// Send only while a debugger is actually connected: `send_message` on an
+		// inactive EngineDebugger is a no-op anyway, but guarding on is_active()
+		// also keeps the snapshot computation (which walks every entity) off the
+		// hot path when nobody is listening.
+		godot::EngineDebugger *dbg = godot::EngineDebugger::get_singleton();
+		if (dbg && dbg->is_active()) {
+			godot::Array payload;
+			payload.append(get_snapshot_data());
+			dbg->send_message("vecs:snapshot", payload);
+		}
+		return true;
 	}
+	if (p_message == "set_field") {
+		_handle_debug_set_field(p_data);
+		return true;
+	}
+	return false; // not ours — let the debugger try other captures
+}
+
+godot::Dictionary VECSWorld::debug_set_field(int64_t p_entity_id, const godot::String &p_comp,
+		const godot::String &p_field, const godot::Variant &p_value) {
+	godot::Dictionary out;
+	out["ok"] = false;
+	out["error"] = godot::String();
+	if (p_entity_id <= 0) {
+		out["error"] = "invalid entity id " + godot::String::num_int64(p_entity_id);
+		return out;
+	}
+	const vortaris::Entity e{ static_cast<uint64_t>(p_entity_id) };
+	if (!core_->is_alive(e)) {
+		out["error"] = "entity " + godot::String::num_int64(p_entity_id) + " is not alive";
+		return out;
+	}
+	const vortaris::ComponentTypeId tid = core_->registry().id_of(godot::StringName(p_comp));
+	if (tid == vortaris::INVALID_COMPONENT_TYPE) {
+		out["error"] = "component '" + p_comp + "' is not registered";
+		return out;
+	}
+	const vortaris::ComponentSchema *schema = core_->registry().schema_of(tid);
+	const vortaris::FieldDescriptor *fd = schema ? schema->find_field(godot::StringName(p_field)) : nullptr;
+	if (!fd) {
+		out["error"] = "field '" + p_field + "' not found on component '" + p_comp + "'";
+		return out;
+	}
+	void *raw = core_->get_raw(e, tid);
+	if (!raw) {
+		out["error"] = "entity does not carry component '" + p_comp + "'";
+		return out;
+	}
+	// Same conversion path as VECSComponent::set_field, but we keep the boolean
+	// result so the editor's ack can distinguish success from a bad value type.
+	if (!vortaris::field_from_variant(*fd, static_cast<uint8_t *>(raw) + fd->offset, p_value)) {
+		out["error"] = "incompatible value for field '" + p_field + "'";
+		return out;
+	}
+	core_->mark_changed(e, tid, p_field);
+	out["ok"] = true;
+	return out;
+}
+
+void VECSWorld::_handle_debug_set_field(const godot::Variant &p_data) {
+	int64_t entity_id = 0;
+	godot::String comp;
+	godot::String field;
+	godot::Variant value;
+	bool parsed = false;
+	if (p_data.get_type() == godot::Variant::ARRAY) {
+		const godot::Array args = p_data;
+		if (args.size() >= 4) {
+			entity_id = static_cast<int64_t>(args[0]);
+			comp = args[1];
+			field = args[2];
+			value = args[3];
+			parsed = true;
+		}
+	}
+	godot::Dictionary result;
+	if (parsed) {
+		result = debug_set_field(entity_id, comp, field, value);
+	} else {
+		result["ok"] = false;
+		result["error"] = "set_field expects [entity_id, comp, field, value]";
+	}
+	const bool ok = result["ok"];
+	const godot::String err = result["error"];
+	if (!ok) {
+		vortaris::log_debug("remote set_field rejected: " + err);
+	}
+	// Ack is best-effort: only sent when a debugger is actually connected.
 	godot::EngineDebugger *dbg = godot::EngineDebugger::get_singleton();
-	if (!dbg || !dbg->is_active()) {
-		return;
+	if (dbg && dbg->is_active()) {
+		godot::Array ack;
+		ack.append(ok);
+		ack.append(entity_id);
+		ack.append(comp);
+		ack.append(field);
+		ack.append(err);
+		dbg->send_message("vecs:set_field_result", ack);
 	}
-	godot::Array payload;
-	payload.append(get_snapshot_data());
-	dbg->send_message("vecs:snapshot", payload);
 }
 
 void VECSWorld::set_verbose(bool p_on) {
@@ -951,6 +1040,7 @@ void VECSWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("merge_world", "source"), &VECSWorld::merge_world);
 	ClassDB::bind_method(D_METHOD("get_debug_stats"), &VECSWorld::get_debug_stats);
 	ClassDB::bind_method(D_METHOD("get_snapshot_data"), &VECSWorld::get_snapshot_data);
+	ClassDB::bind_method(D_METHOD("debug_set_field", "entity_id", "comp", "field", "value"), &VECSWorld::debug_set_field);
 	ClassDB::bind_method(D_METHOD("set_verbose", "on"), &VECSWorld::set_verbose);
 	ClassDB::bind_method(D_METHOD("is_verbose"), &VECSWorld::is_verbose);
 	ClassDB::bind_method(D_METHOD("process", "delta", "group"), &VECSWorld::process, DEFVAL(""));

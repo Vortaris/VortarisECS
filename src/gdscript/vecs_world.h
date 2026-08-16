@@ -131,8 +131,20 @@ public:
 	godot::Dictionary get_snapshot_data();
 	// Internal: receives "vecs:*" messages from the editor debugger (game side).
 	// Not bound to GDScript. Responds to "req_snapshot" by sending back a
-	// "vecs:snapshot" message carrying [get_snapshot_data()].
-	void _debugger_capture(const godot::String &p_message, const godot::Variant &p_data);
+	// "vecs:snapshot" message carrying [get_snapshot_data()], and to
+	// "set_field" (runtime field write) with a "vecs:set_field_result" ack.
+	// Returns true when the message was handled (EngineDebugger::call_capture
+	// requires a bool return, and logging a non-bool return produces a
+	// per-message error spam).
+	bool _debugger_capture(const godot::String &p_message, const godot::Variant &p_data);
+
+	// ---- runtime debug write (EngineDebugger) ----
+	// Validates the entity is alive, the component is attached and the field
+	// exists, then applies `value` (type-coerced by the field schema through the
+	// same path as set_field). Used by the editor's remote ECS monitor to edit
+	// component values live. Returns {"ok": bool, "error": String}.
+	godot::Dictionary debug_set_field(int64_t p_entity_id, const godot::String &p_comp,
+			const godot::String &p_field, const godot::Variant &p_value);
 
 	// ---- per-frame driver ----
 	void process(double p_delta, const godot::String &p_group);
@@ -182,6 +194,10 @@ protected:
 	static void _bind_methods();
 
 private:
+	// Parses the "vecs:set_field" payload ([entity_id, comp, field, value]),
+	// applies it via debug_set_field, and sends a "vecs:set_field_result" ack
+	// [ok, entity_id, comp, field, error] back to the editor debugger.
+	void _handle_debug_set_field(const godot::Variant &p_data);
 	// Shared spawn implementation. Fills r_mapping with {source_id_or_index:
 	// new_id} and returns the array of spawned VECSEntity handles.
 	godot::Array _spawn_from_data_impl(const godot::Array &p_entities, godot::Dictionary &r_mapping);
