@@ -22,7 +22,7 @@ Design reference: [GECS](https://github.com/BlockBreaker-Studios/GECS) — its a
 - **Deterministic binary serialization** — little-endian, fixed-width, byte-identical snapshots.
 - **Pluggable network sync** — `VECSSyncStrategy` abstraction with a default server-authoritative snapshot replication (dirty-checked deltas + periodic reconciliation + anti-ghost). Transport is Godot's MultiplayerAPI (RPC), with a direct in-process test transport.
 
-## What's new in 0.4.0
+## What's new in 0.3.0
 
 - **Hierarchical project settings** — settings reorganized from the flat
   `vortarisecs/verbose` into `vortarisecs/<category>/<name>`, so they group under

@@ -1,6 +1,6 @@
 # VortarisECS Release Notes
 
-## 0.4.0 (2026-08-16)
+## 0.3.0 (2026-08-16)
 
 **Project Settings reorganization + new tunables.** Settings moved from a flat
 `vortarisecs/verbose` to a hierarchical `vortarisecs/<category>/<name>` layout
@@ -31,9 +31,9 @@ value is never clobbered (mirrors the ModLoader F4 fix).
 - New regression T36 covering settings defaults, the registration guard, the
   verbose legacy-path fallback, and the effective reads of
   `default_sync_priority` / `default_throttle_tick` / `compact_json`.
-- `plugin.cfg` version → `0.4.0`; README/README.zh-CN updated.
+- `plugin.cfg` version → `0.3.0`; README/README.zh-CN updated.
 
-## 0.3.0 (2026-08-16)
+### Editor remote monitoring GUI (0.3.0)
 
 **Runtime remote monitoring GUI.** The editor can now inspect a **running** game's
 ECS world live, the same way Godot's scene tree Remote mode works — via an

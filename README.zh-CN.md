@@ -19,7 +19,7 @@
 - **确定性二进制序列化** —— 小端、定宽、逐字节一致（byte-identical）的快照。
 - **可插拔网络同步** —— `VECSSyncStrategy` 抽象 + 默认的服务器权威快照复制（脏检查增量 + 定期对账 + 反幽灵）。传输层是 Godot 的 MultiplayerAPI（RPC），另附进程内直连测试传输。
 
-## 0.4.0 新特性
+## 0.3.0 新特性
 
 - **分层项目设置** —— 设置从扁平的 `vortarisecs/verbose` 重组为 `vortarisecs/<分类>/<名称>`，在“项目设置 > VortarisECS”下分组显示：`vortarisecs/general/verbose`（由 0.3.0 的扁平路径迁移而来，仍兼容回退）、`vortarisecs/general/auto_shutdown_on_exit`、`vortarisecs/general/max_snapshot_entities`、`vortarisecs/debug/auto_refresh_interval`、`vortarisecs/network/default_sync_priority`、`vortarisecs/observer/default_throttle_tick` 与 `vortarisecs/serialization/compact_json`。默认值仅在缺失时写入，绝不覆盖用户已有设置。
 - **原先硬编码的默认值变为设置项** —— 新组件字段的同步档位、observer 的 CHANGED 节流、编辑器远程监控的实体上限 / 自动刷新间隔、退出时的 `shutdown()` 清理，以及快照 JSON 字符串是否紧凑输出。
