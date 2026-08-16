@@ -4,6 +4,7 @@
 
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/ref.hpp>
+#include <godot_cpp/classes/script.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/gdvirtual.gen.inc>
 #include <godot_cpp/variant/string.hpp>
@@ -54,7 +55,24 @@ public:
 	void set_tick_interval(double p_v) { tick_interval = p_v; }
 	double get_tick_interval() const { return tick_interval; }
 
-	godot::String get_system_name() const { return get_name(); }
+	// The system's display name. Authors usually create systems via .new() and
+	// never add them to the scene tree, so the Node name is empty; fall back to
+	// the GDScript resource basename ("res://scripts/script_system.gd" ->
+	// "script_system") or the native class name (C++ systems -> "MoveSystem").
+	godot::String get_system_name() const {
+		godot::String n = get_name();
+		if (!n.is_empty()) {
+			return n;
+		}
+		godot::Ref<godot::Script> sc = get_script();
+		if (sc.is_valid()) {
+			const godot::String path = sc->get_path();
+			if (!path.is_empty()) {
+				return path.get_file().get_basename();
+			}
+		}
+		return get_class();
+	}
 
 	// --- world access (injected by the scheduler) ---
 	vortaris::World *core_world() const { return core_; }

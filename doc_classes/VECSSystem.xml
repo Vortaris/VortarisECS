@@ -38,9 +38,9 @@
 		<method name="get_system_name" qualifiers="const">
 			<return type="String" />
 			<description>
-				Returns the system's name (the node name).
+				Returns the system's display name. Systems are usually created with [code].new()[/code] and never added to the scene tree, so an unset node name falls back to the GDScript resource basename ([code]res://scripts/script_system.gd[/code] -> [code]script_system[/code]) or the native class name (C++ systems -> [code]MoveSystem[/code]). Setting the node [code]name[/code] takes precedence.
 
-				返回系统名称（节点名）。
+				返回系统的显示名称。系统通常用 [code].new()[/code] 创建且从不加入场景树，因此未设置的节点名会回退为 GDScript 资源基名（[code]res://scripts/script_system.gd[/code] -> [code]script_system[/code]）或原生类名（C++ 系统 -> [code]MoveSystem[/code]）。显式设置节点 [code]name[/code] 时优先采用。
 			</description>
 		</method>
 		<method name="get_world_node" qualifiers="const">
