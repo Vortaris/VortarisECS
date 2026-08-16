@@ -45,6 +45,9 @@ extends SceneTree
 #   T36 hierarchical project settings (defaults, registration guard, verbose
 #       backward compatibility, default_sync_priority / default_throttle_tick /
 #       compact_json effective reads)
+# 0.3.0 review fixes (0.4.0):
+#   T37 debug_set_field now ALSO rejects type mismatches (E2)
+#   T38 snapshot truncation honors max_snapshot_entities (E1)
 
 const EcsTestUtil := preload("res://scripts/ecs_test_util.gd")
 
@@ -85,6 +88,7 @@ func _initialize() -> void:
 	_test_t35_snapshot_data(t)
 	_test_t36_settings(t)
 	_test_t37_debug_set_field(t)
+	_test_t38_snapshot_truncation(t)
 	print("total=", t.total, " failures=", t.failures)
 	if t.failures == 0:
 		print("=== VortarisECS Regression OK ===")
@@ -1185,6 +1189,22 @@ func _test_t37_debug_set_field(t: RefCounted) -> void:
 	t.expect_eq(bool(r["ok"]), true, "T37: StringFixed write accepted")
 	t.expect_eq(String(e.getf("T37C", "title")), "warlord", "T37: StringFixed value applied")
 
+	# --- type mismatch rejection (E2) ---
+	# A value whose Variant type does not match the field's expected type must be
+	# refused, NOT silently coerced to zero by Godot's Variant->T conversion.
+	r = w.debug_set_field(e.get_id(), "T37C", "hp", Vector3(1, 2, 3))
+	t.expect_eq(bool(r["ok"]), false, "T37: Vector3 rejected for F32 field (type mismatch)")
+	t.expect(String(r["error"]).contains("type mismatch"), "T37: type mismatch error text")
+	t.expect_eq(float(e.getf("T37C", "hp")), 50.0, "T37: hp unchanged after rejected write")
+
+	r = w.debug_set_field(e.get_id(), "T37C", "hp", "oops")
+	t.expect_eq(bool(r["ok"]), false, "T37: String rejected for F32 field (type mismatch)")
+	t.expect_eq(float(e.getf("T37C", "hp")), 50.0, "T37: hp unchanged after String write")
+
+	r = w.debug_set_field(e.get_id(), "T37C", "alive", 1)
+	t.expect_eq(bool(r["ok"]), false, "T37: int rejected for Bool field (type mismatch)")
+	t.expect_eq(bool(e.getf("T37C", "alive")), false, "T37: alive unchanged after rejected write")
+
 	# --- validation failures ---
 	r = w.debug_set_field(-1, "T37C", "hp", 1.0)
 	t.expect_eq(bool(r["ok"]), false, "T37: non-positive id rejected")
@@ -1210,3 +1230,37 @@ func _test_t37_debug_set_field(t: RefCounted) -> void:
 	t.expect(String(r["error"]).contains("carry"), "T37: component-not-attached error message")
 
 	w.free()
+
+
+# T38: get_snapshot_data() / entities_to_data() honor max_snapshot_entities (E1).
+# The remote-monitor snapshot caps the entity table and flags "truncated", while
+# save-file serialization (serialize_snapshot_json) always exports every entity.
+func _test_t38_snapshot_truncation(t: RefCounted) -> void:
+	print("-- T38: snapshot truncation (E1) --")
+	var saved_max: Variant = ProjectSettings.get_setting("vortarisecs/general/max_snapshot_entities", 500)
+	ProjectSettings.set_setting("vortarisecs/general/max_snapshot_entities", 3)
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T38C", [{"name": "v", "type": "I32"}])
+	for i in 10:
+		var e: VECSEntity = w.create_entity()
+		e.add_component("T38C", {"v": i})
+
+	var snap: Dictionary = w.get_snapshot_data()
+	var ents: Array = snap["entities"]
+	t.expect_eq(ents.size(), 3, "T38: snapshot capped to 3 entities")
+	t.expect_eq(bool(snap.get("truncated", false)), true, "T38: snapshot flagged truncated")
+	t.expect_eq(int(snap.get("entity_total", -1)), 10, "T38: snapshot reports total")
+
+	# entities_to_data() with no cap exports everything (save path).
+	var all: Array = w.entities_to_data()
+	t.expect_eq(all.size(), 10, "T38: entities_to_data() default is uncapped")
+	# An explicit cap limits the export without adding a flag (caller decides).
+	var capped: Array = w.entities_to_data(2)
+	t.expect_eq(capped.size(), 2, "T38: entities_to_data(2) caps")
+
+	# serialize_snapshot_json() must never truncate: a save has to be complete.
+	var save: Dictionary = w.serialize_snapshot_json()
+	t.expect_eq((save["entities"] as Array).size(), 10, "T38: JSON save is complete")
+
+	w.free()
+	ProjectSettings.set_setting("vortarisecs/general/max_snapshot_entities", saved_max)

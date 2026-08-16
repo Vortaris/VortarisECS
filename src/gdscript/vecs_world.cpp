@@ -535,6 +535,48 @@ const char *debug_field_type_name(vortaris::FieldType p_t) {
 	}
 	return "";
 }
+
+// Maps a field descriptor to the Variant type the debugger channel requires for
+// a value. Fixed-array fields (count > 1) are Arrays; StringFixed/Blob map to
+// String / PackedByteArray — their `count` is a byte-buffer capacity, NOT an
+// array length. Returns NIL for unknown FieldTypes (callers skip the check then,
+// letting the schema conversion handle it).
+godot::Variant::Type debug_expected_variant_type(const vortaris::FieldDescriptor &p_fd) {
+	if (!p_fd.is_scalar()) {
+		return p_fd.type == vortaris::FieldType::Blob ? godot::Variant::PACKED_BYTE_ARRAY : godot::Variant::STRING;
+	}
+	if (p_fd.count > 1) {
+		return godot::Variant::ARRAY;
+	}
+	switch (p_fd.type) {
+		case vortaris::FieldType::Bool: return godot::Variant::BOOL;
+		case vortaris::FieldType::I8:
+		case vortaris::FieldType::I16:
+		case vortaris::FieldType::I32:
+		case vortaris::FieldType::I64:
+		case vortaris::FieldType::U8:
+		case vortaris::FieldType::U16:
+		case vortaris::FieldType::U32:
+		case vortaris::FieldType::U64: return godot::Variant::INT;
+		case vortaris::FieldType::F32:
+		case vortaris::FieldType::F64: return godot::Variant::FLOAT;
+		case vortaris::FieldType::Vector2: return godot::Variant::VECTOR2;
+		case vortaris::FieldType::Vector2i: return godot::Variant::VECTOR2I;
+		case vortaris::FieldType::Vector3: return godot::Variant::VECTOR3;
+		case vortaris::FieldType::Vector3i: return godot::Variant::VECTOR3I;
+		case vortaris::FieldType::Vector4: return godot::Variant::VECTOR4;
+		case vortaris::FieldType::Vector4i: return godot::Variant::VECTOR4I;
+		case vortaris::FieldType::Color: return godot::Variant::COLOR;
+		case vortaris::FieldType::Quaternion: return godot::Variant::QUATERNION;
+		case vortaris::FieldType::Basis: return godot::Variant::BASIS;
+		case vortaris::FieldType::Transform2D: return godot::Variant::TRANSFORM2D;
+		case vortaris::FieldType::Transform3D: return godot::Variant::TRANSFORM3D;
+		case vortaris::FieldType::AABB: return godot::Variant::AABB;
+		case vortaris::FieldType::Rect2: return godot::Variant::RECT2;
+		case vortaris::FieldType::Plane: return godot::Variant::PLANE;
+	}
+	return godot::Variant::NIL;
+}
 } // namespace
 
 godot::Dictionary VECSWorld::get_snapshot_data() {
@@ -586,7 +628,18 @@ godot::Dictionary VECSWorld::get_snapshot_data() {
 	}
 	out["systems"] = systems;
 
-	out["entities"] = entities_to_data();
+	// The remote-monitor entity table is bounded by
+	// `vortarisecs/general/max_snapshot_entities` (default 500) so a huge world
+	// (100k+ entities) does not serialize megabytes every auto-refresh tick.
+	// Save-file serialization (serialize_snapshot_json) still exports everything.
+	const int64_t max_entities = vortaris::get_max_snapshot_entities();
+	const int64_t total_entities = static_cast<int64_t>(core_->entity_count());
+	const godot::Array ents = entities_to_data(max_entities);
+	out["entities"] = ents;
+	if (max_entities > 0 && total_entities > static_cast<int64_t>(ents.size())) {
+		out["truncated"] = true;
+		out["entity_total"] = total_entities;
+	}
 	return out;
 }
 
@@ -641,10 +694,28 @@ godot::Dictionary VECSWorld::debug_set_field(int64_t p_entity_id, const godot::S
 		out["error"] = "entity does not carry component '" + p_comp + "'";
 		return out;
 	}
-	// Same conversion path as VECSComponent::set_field, but we keep the boolean
-	// result so the editor's ack can distinguish success from a bad value type.
+	// Type-check before writing: godot-cpp's implicit Variant->T conversion
+	// silently coerces incompatible values (a Vector3 passed to an F32 field
+	// becomes 0), so without this a bad edit would "succeed" and zero the field.
+	// Reject any Variant whose type does not match the field's expected type.
+	const godot::Variant::Type expected_type = debug_expected_variant_type(*fd);
+	if (expected_type != godot::Variant::NIL && p_value.get_type() != expected_type) {
+		out["error"] = "type mismatch for field '" + p_field + "' (expected " +
+				godot::String(godot::Variant::get_type_name(expected_type)) + ", got " +
+				godot::String(godot::Variant::get_type_name(p_value.get_type())) + ")";
+		return out;
+	}
+	// Apply through the same schema-driven conversion as VECSComponent::set_field.
 	if (!vortaris::field_from_variant(*fd, static_cast<uint8_t *>(raw) + fd->offset, p_value)) {
 		out["error"] = "incompatible value for field '" + p_field + "'";
+		return out;
+	}
+	// Read back through the snapshot path so the write is verified observable
+	// (defense in depth against a conversion that silently mis-writes).
+	godot::Variant written;
+	if (!vortaris::field_to_variant(*fd, static_cast<const uint8_t *>(raw) + fd->offset, written) ||
+			written.get_type() != expected_type) {
+		out["error"] = "field '" + p_field + "' did not verify after write";
 		return out;
 	}
 	core_->mark_changed(e, tid, p_field);
@@ -699,11 +770,12 @@ void VECSWorld::set_verbose(bool p_on) {
 
 bool VECSWorld::is_verbose() const {
 #ifdef DEBUG_ENABLED
-	// Re-read the persisted setting (canonical path, legacy fallback) so the
-	// reported state always reflects the project setting — including an
-	// upgraded project that still only has `vortarisecs/verbose`. Release
-	// builds compile verbose logging out entirely.
-	return vortaris::get_verbose_setting();
+	// Re-read the persisted setting (canonical path, legacy fallback) into the
+	// logging cache so the reported state always agrees with what log_verbose()
+	// actually emits — including a direct ProjectSettings write that bypasses
+	// set_verbose() (E3). Release builds compile verbose logging out entirely.
+	vortaris::refresh_verbose();
+	return vortaris::verbose_active();
 #else
 	return false;
 #endif
@@ -857,15 +929,21 @@ godot::Array VECSWorld::_spawn_from_data_impl(const godot::Array &p_entities, go
 	return out;
 }
 
-godot::Array VECSWorld::entities_to_data() {
+godot::Array VECSWorld::entities_to_data(int64_t p_max_entities) {
 	godot::Array out;
 	vortaris::World &w = core();
 	std::vector<vortaris::Archetype *> arches = w.all_archetypes();
 	std::sort(arches.begin(), arches.end(), [](const vortaris::Archetype *a, const vortaris::Archetype *b) {
 		return a->signature < b->signature;
 	});
+	int64_t emitted = 0;
 	for (const vortaris::Archetype *a : arches) {
 		for (size_t row = 0; row < a->entities.size(); ++row) {
+			// Bounded export (E1): stop early instead of walking the rest of a
+			// huge world when the caller passed a cap (the remote monitor does).
+			if (p_max_entities > 0 && emitted >= p_max_entities) {
+				return out;
+			}
 			godot::Dictionary edata;
 			edata["id"] = static_cast<int64_t>(a->entities[row].id);
 			godot::Dictionary comps;
@@ -881,6 +959,7 @@ godot::Array VECSWorld::entities_to_data() {
 			}
 			edata["components"] = comps;
 			out.append(edata);
+			++emitted;
 		}
 	}
 	return out;
@@ -1052,7 +1131,7 @@ void VECSWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("register_components", "components"), &VECSWorld::register_components);
 	ClassDB::bind_method(D_METHOD("spawn_from_data", "entities"), &VECSWorld::spawn_from_data);
 	ClassDB::bind_method(D_METHOD("spawn_from_data_mapped", "entities"), &VECSWorld::spawn_from_data_mapped);
-	ClassDB::bind_method(D_METHOD("entities_to_data"), &VECSWorld::entities_to_data);
+	ClassDB::bind_method(D_METHOD("entities_to_data", "max_entities"), &VECSWorld::entities_to_data, DEFVAL((int64_t)0));
 	ClassDB::bind_method(D_METHOD("serialize_snapshot_json"), &VECSWorld::serialize_snapshot_json);
 	ClassDB::bind_method(D_METHOD("serialize_snapshot_json_string"), &VECSWorld::serialize_snapshot_json_string);
 	ClassDB::bind_method(D_METHOD("deserialize_snapshot_json", "data"), &VECSWorld::deserialize_snapshot_json);

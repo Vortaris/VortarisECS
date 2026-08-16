@@ -62,6 +62,16 @@ func _on_session_stopped(session_id: int) -> void:
 	var tab = _tabs.get(session_id)
 	if is_instance_valid(tab):
 		tab.set_connected(false)
+		# Drop the tab entirely (E6): a stopped session must not leave a dangling
+		# "ECS" tab / dict entry that accumulates across repeated F5 runs. The
+		# engine-owned remove_session_tab() detaches it from the debugger panel
+		# (and the session's internal tab list) before we free it; _setup_session
+		# creates a fresh tab if this session (or a new id) starts again.
+		_tabs.erase(session_id)
+		var session := get_session(session_id)
+		if session != null:
+			session.remove_session_tab(tab)
+		tab.queue_free()
 
 
 func _capture(message: String, data: Array, session_id: int) -> bool:

@@ -159,10 +159,11 @@
 		</method>
 		<method name="entities_to_data">
 			<return type="Array" />
+			<param index="0" name="max_entities" type="int" default="0" />
 			<description>
-				Exports every entity as an [Array] of dictionaries of the form [code][{"id": int, "components": {"Name": {field: value}}}, ...][/code], in deterministic order (archetypes sorted by signature). Inverse of [method spawn_from_data]. Prefer the binary [method serialize_snapshot] for large worlds.
+				Exports entities as an [Array] of dictionaries of the form [code][{"id": int, "components": {"Name": {field: value}}}, ...][/code], in deterministic order (archetypes sorted by signature). Inverse of [method spawn_from_data]. [param max_entities] caps the export (0 = no limit): the editor's remote monitor passes it so a huge world stays bounded, while save-file serialization calls it without a cap and always exports every entity. Prefer the binary [method serialize_snapshot] for large worlds.
 
-				把每个实体导出为 [code][{"id": int, "components": {"Name": {field: value}}}, ...][/code] 形式的字典 [Array]，顺序确定（archetype 按签名排序）。是 [method spawn_from_data] 的逆操作。大型世界请优先用二进制 [method serialize_snapshot]。
+				把实体导出为 [code][{"id": int, "components": {"Name": {field: value}}}, ...][/code] 形式的字典 [Array]，顺序确定（archetype 按签名排序）。是 [method spawn_from_data] 的逆操作。[param max_entities] 限制导出条数（0 = 不限制）：编辑器的远程监视器传入它，使大型世界保持有界；存档序列化则不带上限调用，始终导出全部实体。大型世界请优先用二进制 [method serialize_snapshot]。
 			</description>
 		</method>
 		<method name="entity" qualifiers="const">
@@ -223,9 +224,9 @@
 		<method name="get_snapshot_data">
 			<return type="Dictionary" />
 			<description>
-				Returns a JSON-able [Dictionary] describing the whole world for the editor's remote ECS monitor: [code]{"protocol", "version", "stats", "components", "systems", "entities"}[/code]. [code]stats[/code] is the same dictionary as [method get_debug_stats]; [code]components[/code] lists every registered component type (name, id, size, and a [code]fields[/code] array of name/type/count/sync_priority/networked); [code]systems[/code] lists every registered system (name/group/active/paused/tick_interval/flush_mode); [code]entities[/code] is the same data as [method entities_to_data]. The game-side message capture sends this to the editor over the EngineDebugger channel (prefix [code]"vecs"[/code]) on demand. Building the full entity table every frame is expensive, so request it on demand (see the editor's "ECS" debugger tab).
+				Returns a JSON-able [Dictionary] describing the whole world for the editor's remote ECS monitor: [code]{"protocol", "version", "stats", "components", "systems", "entities"}[/code]. [code]stats[/code] is the same dictionary as [method get_debug_stats]; [code]components[/code] lists every registered component type (name, id, size, and a [code]fields[/code] array of name/type/count/sync_priority/networked); [code]systems[/code] lists every registered system (name/group/active/paused/tick_interval/flush_mode); [code]entities[/code] is the same data as [method entities_to_data], capped at [code]vortarisecs/general/max_snapshot_entities[/code] (default 500) so a huge world does not serialize megabytes per auto-refresh tick — when the cap cuts the list the dictionary also carries [code]"truncated": true[/code] and [code]"entity_total"[/code] (the real world count). The game-side message capture sends this to the editor over the EngineDebugger channel (prefix [code]"vecs"[/code]) on demand. Building the full entity table every frame is expensive, so request it on demand (see the editor's "ECS" debugger tab).
 
-				返回一个可 JSON 化的 [Dictionary]，用于编辑器的远程 ECS 监视器，描述整个世界：[code]{"protocol", "version", "stats", "components", "systems", "entities"}[/code]。[code]stats[/code] 与 [method get_debug_stats] 相同；[code]components[/code] 列出每个已注册组件类型（name、id、size，以及 [code]fields[/code] 数组，含 name/type/count/sync_priority/networked）；[code]systems[/code] 列出每个已注册系统（name/group/active/paused/tick_interval/flush_mode）；[code]entities[/code] 与 [method entities_to_data] 相同。游戏侧消息捕获经 EngineDebugger 通道（前缀 [code]"vecs"[/code]）按需发送给编辑器。每帧构建完整实体表代价高昂，请按需请求（见编辑器 “ECS” 调试选项卡）。
+				返回一个可 JSON 化的 [Dictionary]，用于编辑器的远程 ECS 监视器，描述整个世界：[code]{"protocol", "version", "stats", "components", "systems", "entities"}[/code]。[code]stats[/code] 与 [method get_debug_stats] 相同；[code]components[/code] 列出每个已注册组件类型（name、id、size，以及 [code]fields[/code] 数组，含 name/type/count/sync_priority/networked）；[code]systems[/code] 列出每个已注册系统（name/group/active/paused/tick_interval/flush_mode）；[code]entities[/code] 与 [method entities_to_data] 相同，但按 [code]vortarisecs/general/max_snapshot_entities[/code]（默认 500）截断，避免大世界每次自动刷新都序列化出 MB 级数据——截断发生时字典额外带有 [code]"truncated": true[/code] 与 [code]"entity_total"[/code]（真实实体总数）。游戏侧消息捕获经 EngineDebugger 通道（前缀 [code]"vecs"[/code]）按需发送给编辑器。每帧构建完整实体表代价高昂，请按需请求（见编辑器 “ECS” 调试选项卡）。
 			</description>
 		</method>
 		<method name="debug_set_field">
@@ -235,9 +236,9 @@
 			<param index="2" name="field" type="String" />
 			<param index="3" name="value" type="Variant" />
 			<description>
-				Runtime-debug write: validates that the entity is alive, the component is attached and the field exists, then applies [param value] through the same schema-driven conversion as [method VECSComponent.set_field]. Returns [code]{"ok": bool, "error": String}[/code]; [code]error[/code] is empty on success. This is the game-side handler behind the editor's "ECS" debugger tab live value editing (channel [code]"vecs:set_field"[/code]); it performs no structural changes and is safe to call on a running world.
+				Runtime-debug write: validates that the entity is alive, the component is attached, the field exists AND that [param value]'s Variant type matches the field's expected type, then applies it through the same schema-driven conversion as [method VECSComponent.set_field]. A type mismatch is rejected with [code]{"ok": false, "error": "type mismatch ..."}[/code] instead of being silently coerced to a zero value by Godot's Variant-to-type conversion. Returns [code]{"ok": bool, "error": String}[/code]; [code]error[/code] is empty on success. This is the game-side handler behind the editor's "ECS" debugger tab live value editing (channel [code]"vecs:set_field"[/code]); it performs no structural changes and is safe to call on a running world.
 
-				运行时调试写入：校验实体存活、组件已挂载且字段存在，然后通过与 [method VECSComponent.set_field] 相同的 schema 驱动转换应用 [param value]。返回 [code]{"ok": bool, "error": String}[/code]；成功时 [code]error[/code] 为空。这是编辑器 “ECS” 调试选项卡实时改值（通道 [code]"vecs:set_field"[/code]）背后的游戏侧处理；它不进行任何结构性修改，可安全地在运行中的世界上调用。
+				运行时调试写入：校验实体存活、组件已挂载、字段存在，且 [param value] 的 Variant 类型与字段期望类型一致，然后通过与 [method VECSComponent.set_field] 相同的 schema 驱动转换应用该值。类型不匹配时返回 [code]{"ok": false, "error": "type mismatch ..."}[/code]，而不是被 Godot 的 Variant→类型转换静默地写成零值。返回 [code]{"ok": bool, "error": String}[/code]；成功时 [code]error[/code] 为空。这是编辑器 “ECS” 调试选项卡实时改值（通道 [code]"vecs:set_field"[/code]）背后的游戏侧处理；它不进行任何结构性修改，可安全地在运行中的世界上调用。
 			</description>
 		</method>
 		<method name="get_world">
@@ -397,9 +398,9 @@
 		<method name="is_verbose" qualifiers="const">
 			<return type="bool" />
 			<description>
-				Returns [code]true[/code] when detailed verbose logging is active for this process (debug build AND the [code]vortarisecs/general/verbose[/code] project setting, which falls back to the legacy [code]vortarisecs/verbose[/code] path from 0.3.0). In release builds this always returns [code]false[/code].
+				Returns [code]true[/code] when detailed verbose logging is active for this process (debug build AND the [code]vortarisecs/general/verbose[/code] project setting, which falls back to the legacy [code]vortarisecs/verbose[/code] path from 0.3.0). Reading this also re-syncs the internal logging cache with the persisted setting, so the reported state always agrees with what the verbose logs actually emit (a direct [method ProjectSettings.set_setting] write is picked up here). In release builds this always returns [code]false[/code].
 
-				返回当前进程是否启用了详细 verbose 日志（debug 构建且 [code]vortarisecs/general/verbose[/code] 项目设置为真，并回退兼容 0.3.0 的旧 [code]vortarisecs/verbose[/code] 路径）。release 构建恒返回 [code]false[/code]。
+				返回当前进程是否启用了详细 verbose 日志（debug 构建且 [code]vortarisecs/general/verbose[/code] 项目设置为真，并回退兼容 0.3.0 的旧 [code]vortarisecs/verbose[/code] 路径）。读取该方法还会把内部日志缓存与持久化设置重新同步，因此报告的状态始终与 verbose 日志实际输出一致（此处会捕获直接调用 [method ProjectSettings.set_setting] 的写入）。release 构建恒返回 [code]false[/code]。
 			</description>
 		</method>
 		<method name="set_entity_range">

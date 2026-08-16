@@ -29,7 +29,7 @@
 ## 0.3.0 新特性
 
 - **运行时远程监控 GUI** —— 游戏运行时，编辑器调试器底部面板新增 **“ECS”** 选项卡，实时显示**运行中**游戏的 ECS 世界：Entities（实体 id → 组件 → 字段）、Components（组件注册表及字段元数据）、Systems（名称/分组/启用状态）与 Stats（世界统计）。原理同 Godot 场景树的 Remote 模式：编辑器经 `EngineDebugger` 发送 `vecs:req_snapshot`，游戏用新的 `VECSWorld.get_snapshot_data()` 回发 `vecs:snapshot`。提供“刷新”按钮与可选 ~1Hz 自动刷新；快照仅按需发送。
-- **`VECSWorld.get_snapshot_data()`** —— 返回整个世界的可 JSON 化 Dictionary（`stats` / `components` / `systems` / `entities`）；供编辑器选项卡使用。
+- **`VECSWorld.get_snapshot_data()`** —— 返回世界的可 JSON 化 Dictionary（`stats` / `components` / `systems` / `entities`）；供编辑器选项卡使用。实体表按 `vortarisecs/general/max_snapshot_entities`（默认 500）截断并带 `truncated` / `entity_total` 标志，避免 10 万实体的世界每次刷新都序列化出 MB 级数据；经 `serialize_snapshot_json()` 写存档时永不截断。
 - 原有检查器 dock（`editor/ecs_inspector_dock.gd`）保留，仍用于查看编辑器侧世界；**运行中**游戏请使用新的调试器选项卡。
 
 ## 0.2.1 新特性

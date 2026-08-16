@@ -1,5 +1,29 @@
 # VortarisECS Release Notes
 
+## 0.3.0 review fixes (unreleased)
+
+Fixes from the 0.3.0 adversarial review:
+
+- **E1** `get_snapshot_data()` / `entities_to_data(max_entities)` now cap the
+  entity table at `vortarisecs/general/max_snapshot_entities` (default 500) and
+  flag `truncated` / `entity_total`, so a 100k-entity world does not serialize
+  megabytes every 1 Hz refresh; save files (`serialize_snapshot_json`) are never
+  truncated. The editor Entities page shows "truncated (N/total)".
+- **E2** `debug_set_field()` rejects a value whose Variant type does not match
+  the field's expected type (`{"ok": false, "error": "type mismatch ..."}`)
+  instead of silently zeroing the field, and reads the write back to verify it.
+- **E3** `is_verbose()` re-syncs the logging cache with the persisted setting, so
+  the reported state always agrees with what verbose logs emit.
+- **E4** the editor debugger tab clears in-flight `_pending_edits` on disconnect.
+- **E5** every `vortarisecs/*` project setting now seeds `set_initial_value`, so
+  the editor's "reset to default" restores the documented default instead of null.
+- **E6** the editor debugger plugin drops the session tab / dict entry on stop
+  (`remove_session_tab` + `queue_free`), so repeated F5 runs no longer accumulate
+  dangling tabs.
+- **E8** a bool cell edit that is not true/false/1/0 is refused (keeps the old
+  value and hints the user) instead of silently writing false.
+- Regression suite is now T1–T38 / 223 assertions; CLAUDE.md updated to match.
+
 ## 0.3.0 (2026-08-16)
 
 **Project Settings reorganization + new tunables.** Settings moved from a flat

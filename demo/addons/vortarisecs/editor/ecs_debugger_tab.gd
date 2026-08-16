@@ -90,6 +90,12 @@ var _last_components: Variant = []
 var _last_systems: Variant = []
 var _last_entities: Variant = []
 
+# E1: the game caps the snapshot entity table at max_snapshot_entities and flags
+# it with "truncated": true + "entity_total". Kept so the Entities page can show
+# "truncated (N/total)" instead of silently hiding rows.
+var _snapshot_truncated := false
+var _snapshot_entity_total := 0
+
 # E8 live edits that the game has not yet acked (W2). Keyed by
 # "<eid>/<comp>/<field>" -> coerced Variant. Overlaid onto every incoming
 # snapshot AND onto the local cache, so a re-render that fires between the edit
@@ -194,6 +200,10 @@ func set_connected(connected: bool) -> void:
 		_status_label.text = "Waiting for game (run with F5) — VortarisECS"
 		_status_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.5))
 		_status_label.tooltip_text = "Start the project from the editor (F5) to monitor its live ECS world."
+		# Disconnect (session stopped / game ended): drop any in-flight live edits
+		# from the previous game so a stale edit cannot be overlaid onto a NEW
+		# session's snapshot after reconnect (E4).
+		_pending_edits.clear()
 
 
 func set_snapshot(snapshot: Dictionary) -> void:
@@ -204,6 +214,8 @@ func set_snapshot(snapshot: Dictionary) -> void:
 	_last_components = snapshot.get("components", [])
 	_last_systems = snapshot.get("systems", [])
 	_last_entities = snapshot.get("entities", [])
+	_snapshot_truncated = bool(snapshot.get("truncated", false))
+	_snapshot_entity_total = int(snapshot.get("entity_total", (_last_entities as Array).size()))
 	# A snapshot may have been computed before the game processed an in-flight
 	# E8 edit (auto-refresh race). Re-apply unacked edits so a stale snapshot
 	# does not roll the just-edited cell back to its pre-edit value (W2).
@@ -607,6 +619,11 @@ func _render_entities() -> void:
 						"field": str(fname),
 						"value": raw_value,
 					})
+	if _snapshot_truncated and not note_shown:
+		# E1: the game capped the entity table before sending; show how many of
+		# the world's total entities made it into this snapshot.
+		var note := _entities_tree.create_item(root)
+		note.set_text(0, "… snapshot truncated: %d of %d entities shown (limit %d)" % [count, _snapshot_entity_total, _max_entities])
 	_apply_collapse_state(_entities_tree, _entities_expanded, filter_active)
 
 
@@ -1061,6 +1078,12 @@ func _on_entity_field_edited() -> void:
 	var original: Variant = meta.get("value")
 	var value := _coerce_field_value(original, item.get_text(col))
 	if value == original:
+		# Unparsable edits keep the last known good text (E8): never send a coerced
+		# false just because Godot accepted a garbage bool literal. Hint the user
+		# when a bool cell received text that is not true/false/1/0.
+		if typeof(original) == TYPE_BOOL and not _bool_text_valid(item.get_text(col)):
+			_status_label.text = "Invalid boolean for %s.%s on #%d (use true/false/1/0)" % [comp, field, eid]
+			_status_label.add_theme_color_override("font_color", Color(0.9, 0.5, 0.4))
 		return  # unparsable / unchanged — keep the last known good text
 	# W2: keep this edit in flight locally so a re-render that arrives before the
 	# confirming snapshot (auto-refresh tick, sort, filter) shows the new value
@@ -1097,6 +1120,13 @@ func set_field_result(ok: bool, entity_id: int, comp: String, field: String, err
 	_request_snapshot()
 
 
+## True when `text` is an accepted bool cell literal: true/false/1/0,
+## case-insensitive (E8). Anything else is refused rather than coerced to false.
+func _bool_text_valid(text: String) -> bool:
+	var s := text.strip_edges().to_lower()
+	return s == "true" or s == "false" or s == "1" or s == "0"
+
+
 ## Parses the text a user typed into a Value cell back into the Variant type of
 ## the original value. Returns the original value when the text cannot be parsed,
 ## so a bad edit degrades to "no change" instead of corrupting the field.
@@ -1107,8 +1137,14 @@ func _coerce_field_value(original: Variant, text: String) -> Variant:
 		TYPE_INT:
 			return int(text) if text.is_valid_int() else original
 		TYPE_BOOL:
+			# Strict (E8): only true/false/1/0 parse; anything else keeps the
+			# original value so the caller never sends a silently-coerced false.
 			var s := text.strip_edges().to_lower()
-			return s == "true" or s == "1" or s == "yes" or s == "on"
+			if s == "true" or s == "1":
+				return true
+			if s == "false" or s == "0":
+				return false
+			return original
 		TYPE_STRING:
 			return text
 		TYPE_VECTOR2:

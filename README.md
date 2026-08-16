@@ -53,8 +53,12 @@ Design reference: [GECS](https://github.com/BlockBreaker-Studios/GECS) — its a
   mode: the editor sends `vecs:req_snapshot` over `EngineDebugger`, the game
   replies with `vecs:snapshot` from the new `VECSWorld.get_snapshot_data()`.
   Refresh button + optional ~1 Hz auto-refresh; snapshots are on-demand only.
-- **`VECSWorld.get_snapshot_data()`** — JSON-able Dictionary of the whole world
-  (`stats` / `components` / `systems` / `entities`); used by the editor tab.
+- **`VECSWorld.get_snapshot_data()`** — JSON-able Dictionary of the world
+  (`stats` / `components` / `systems` / `entities`); used by the editor tab. The
+  entity table is capped at `vortarisecs/general/max_snapshot_entities` (default
+  500) with a `truncated`/`entity_total` flag, so a 100k-entity world does not
+  serialize megabytes per refresh; save files via `serialize_snapshot_json()` are
+  never truncated.
 - The existing inspector dock (`editor/ecs_inspector_dock.gd`) remains for the
   editor-side world; the new debugger tab is the one that sees the running game.
 

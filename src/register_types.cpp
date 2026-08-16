@@ -41,7 +41,9 @@ namespace {
 // seeded default. `set_setting` must come first: `add_property_info` only
 // attaches editor metadata to an existing setting. The default is written only
 // when the setting is absent, so a user's baked-in value is never clobbered
-// (mirrors the ModLoader F4 fix).
+// (mirrors the ModLoader F4 fix). `set_initial_value` seeds the editor's
+// "reset to default" target so a reset restores the documented default instead
+// of null (0.3.0 E5 fix).
 void register_setting(const char *p_name, const Variant &p_default, Variant::Type p_type,
 		PropertyHint p_hint, const String &p_hint_string) {
 	ProjectSettings *ps = ProjectSettings::get_singleton();
@@ -51,6 +53,7 @@ void register_setting(const char *p_name, const Variant &p_default, Variant::Typ
 	if (!ps->has_setting(StringName(p_name))) {
 		ps->set_setting(StringName(p_name), p_default);
 	}
+	ps->set_initial_value(StringName(p_name), p_default);
 	Dictionary pi;
 	pi["name"] = StringName(p_name);
 	pi["type"] = p_type;
@@ -105,6 +108,9 @@ void initialize_vortarisecs_module(ModuleInitializationLevel p_level) {
 		verbose_hint["hint"] = PropertyHint::PROPERTY_HINT_NONE;
 		verbose_hint["hint_string"] = String("Detailed verbose logging (debug builds only; migrated from vortarisecs/verbose in 0.3.0).");
 		ps->add_property_info(verbose_hint);
+		// E5: seed the editor's "reset" target so resetting verbose restores the
+		// effective (possibly migrated) default rather than null.
+		ps->set_initial_value("vortarisecs/general/verbose", (bool)ps->get_setting("vortarisecs/general/verbose", false));
 
 		register_setting("vortarisecs/general/auto_shutdown_on_exit", Variant(true), Variant::BOOL,
 				PropertyHint::PROPERTY_HINT_NONE,

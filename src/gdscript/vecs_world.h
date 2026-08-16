@@ -119,15 +119,21 @@ public:
 	void set_verbose(bool p_on);
 	// Whether detailed verbose logging is active for this process: debug build
 	// AND the `vortarisecs/general/verbose` project setting (with fallback to
-	// the legacy `vortarisecs/verbose` path). Always false in release builds.
+	// the legacy `vortarisecs/verbose` path). Reading it also re-syncs the
+	// internal logging cache, so the reported state always agrees with what
+	// log_verbose() emits. Always false in release builds.
 	bool is_verbose() const;
 
 	// ---- remote runtime monitor (EngineDebugger) ----
-	// Returns a JSON-able Dictionary describing the whole world for the editor's
-	// remote ECS monitor (see addons/vortarisecs/editor/ecs_debugger_*.gd):
+	// Returns a JSON-able Dictionary describing the world for the editor's remote
+	// ECS monitor (see addons/vortarisecs/editor/ecs_debugger_*.gd):
 	// { "protocol", "version", "stats", "components": [...], "systems": [...],
-	// "entities": [...] }. Sending the whole entity table every frame is costly,
-	// so this is only computed on demand when the editor requests a snapshot.
+	// "entities": [...] }. The entity table is capped at
+	// `vortarisecs/general/max_snapshot_entities` (default 500) with a
+	// "truncated": true + "entity_total" flag when the cap cuts it, so a huge
+	// world does not serialize megabytes per refresh. Sending the whole entity
+	// table every frame is costly, so this is only computed on demand when the
+	// editor requests a snapshot.
 	godot::Dictionary get_snapshot_data();
 	// Internal: receives "vecs:*" messages from the editor debugger (game side).
 	// Not bound to GDScript. Responds to "req_snapshot" by sending back a
@@ -139,10 +145,13 @@ public:
 	bool _debugger_capture(const godot::String &p_message, const godot::Variant &p_data);
 
 	// ---- runtime debug write (EngineDebugger) ----
-	// Validates the entity is alive, the component is attached and the field
-	// exists, then applies `value` (type-coerced by the field schema through the
-	// same path as set_field). Used by the editor's remote ECS monitor to edit
-	// component values live. Returns {"ok": bool, "error": String}.
+	// Validates the entity is alive, the component is attached, the field exists
+	// AND the value's Variant type matches the field's expected type, then applies
+	// `value` through the same conversion path as set_field. A type mismatch is
+	// rejected ({"ok": false, "error": "type mismatch ..."}) instead of being
+	// silently coerced to a zero value by Godot's Variant->T conversion. Used by
+	// the editor's remote ECS monitor to edit component values live. Returns
+	// {"ok": bool, "error": String}.
 	godot::Dictionary debug_set_field(int64_t p_entity_id, const godot::String &p_comp,
 			const godot::String &p_field, const godot::Variant &p_value);
 
@@ -172,8 +181,11 @@ public:
 	// after the batch (see remap_reference). Entries that carry an "id" are keyed
 	// by that id; entries without one are keyed by their array index.
 	godot::Dictionary spawn_from_data_mapped(const godot::Array &p_entities);
-	// Exports every entity as [{ "id", "components": { "Name": {fields...} } }] (deterministic order).
-	godot::Array entities_to_data();
+	// Exports every entity as [{ "id", "components": { "Name": {fields...} } }]
+	// (deterministic order). `max_entities` caps the export (0 = no limit): the
+	// editor's remote monitor uses it so a snapshot of a huge world stays bounded,
+	// while save-file serialization passes no cap and always exports every entity.
+	godot::Array entities_to_data(int64_t p_max_entities = 0);
 	// World save as a JSON-able Dictionary: { "version", "entities": [...] }.
 	godot::Dictionary serialize_snapshot_json();
 	// World save as a JSON String. Honors `vortarisecs/serialization/compact_json`:
