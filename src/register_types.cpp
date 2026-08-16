@@ -76,7 +76,12 @@ void initialize_vortarisecs_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(VECSQueryBuilder);
 	GDREGISTER_CLASS(VECSCommandBuffer);
 	GDREGISTER_VIRTUAL_CLASS(VECSSystem);
-	GDREGISTER_VIRTUAL_CLASS(VECSObserver);
+	// VECSObserver is intentionally a CONCRETE class since 0.3.1: it must be
+	// directly instantiable from GDScript (`VECSObserver.new()`) so CHANT can
+	// build observers without subclassing. Subclassing (GDScript `_script_each`
+	// override, or C++ `_each`) still works, and a plain set_callback() callable
+	// is the no-subclass path.
+	GDREGISTER_CLASS(VECSObserver);
 	GDREGISTER_CLASS(MoveSystem);
 	GDREGISTER_CLASS(ViewSystem);
 	GDREGISTER_CLASS(VECSSyncStrategy);

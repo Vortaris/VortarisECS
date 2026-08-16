@@ -69,6 +69,16 @@ public:
 	// Spawns one entity whose components are given as a Dictionary:
 	//   world.spawn({"Position": {"x": 0.0, "y": 0.0}, "Velocity": {"x": 1.0}})
 	godot::Ref<VECSEntity> spawn(const godot::Dictionary &p_components);
+	// Creates an entity (optionally with a preassigned id) and adds every
+	// component in `p_components` in one call — a merge of
+	// create_entity[_preassigned] + add_component. `def_id` <= 0 auto-assigns the
+	// id; a positive `def_id` preassigns it (the CHANT "row -> component dict"
+	// spawn helpers collapse to this). Absent component fields are filled with
+	// their schema default (zero / empty string / false / zeroed array slots), so
+	// callers only supply the fields they care about. Returns a handle to the new
+	// entity, or a null handle if creation failed (unregistered component or an id
+	// conflict — nothing is left half-spawned).
+	godot::Ref<VECSEntity> create_with_components(int64_t p_def_id, const godot::Dictionary &p_components);
 	// Iterates every entity having all the given components, calling
 	// p_callable(ent) per entity WITHOUT materializing an Array.
 	void each(const godot::Array &p_components, const godot::Callable &p_callable);
@@ -88,6 +98,35 @@ public:
 	// ---- observers / events ----
 	void add_observer(VECSObserver *p_observer);
 	void remove_observer(VECSObserver *p_observer);
+	// One-call observer factory (0.3.1): creates a VECSObserver, wires
+	// `p_callable` as its callback, configures it from `p_opts`, and registers it
+	// with this world in one step. The callback signature is
+	//   func(event: int, entity: VECSEntity, payload: Variant) -> void
+	// (event is a VECSObserver.Event constant). Returns the observer node; the
+	// caller owns it — call free() (which auto-unregisters) when done, or keep it
+	// for the world's lifetime and let VECSWorld.shutdown() drop the dispatch.
+	//
+	// p_opts keys (all optional):
+	//   "events"          int bitmask of VECSObserver.Event, or an Array of names
+	//                     ("added","removed","changed","matched","unmatched",
+	//                     "custom"). Default: CHANGED.
+	//   "components"      Array of component names the observer watches
+	//                     (default: every component).
+	//   "fields"          Array of field names for the CHANGED field filter.
+	//   "match_components" Array for MATCHED/UNMATCHED membership tracking.
+	//   "custom_event_name" String filter for custom events.
+	//   "throttle_tick"   int change-tick throttle for CHANGED delivery.
+	//   "flush_mode"      int VECSObserver.FlushMode.
+	VECSObserver *create_observer(const godot::Callable &p_callable, const godot::Dictionary &p_opts = godot::Dictionary());
+	// Thin convenience over create_observer for the CHANT per-frame-poll
+	// replacement:
+	//   world.on_changed("Combatant", {"fields": ["hp"], "callable": cb})
+	// Creates a CHANGED-only observer watching component `p_comp`. p_opts may
+	// carry "fields" (Array), "throttle_tick" (int) and "callable" (the callback;
+	// when absent no events are delivered). Returns the observer node (caller
+	// owns it; free() to unregister). The callback receives
+	// (event: int, entity: VECSEntity, payload: Variant).
+	VECSObserver *on_changed(const godot::String &p_comp, const godot::Dictionary &p_opts);
 	// Broadcasts a custom event; returns the number of observer callbacks that
 	// actually received it.
 	int64_t emit_event(const godot::String &p_name, const godot::Ref<VECSEntity> &p_entity, const godot::Variant &p_payload);

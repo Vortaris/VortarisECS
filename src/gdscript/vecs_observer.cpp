@@ -24,6 +24,10 @@ VECSObserver::VECSObserver() {
 	throttle_tick_ = vortaris::get_default_throttle_tick();
 }
 
+void VECSObserver::set_callback(const godot::Callable &p_callable) {
+	callback_ = p_callable;
+}
+
 void VECSObserver::set_events(int p_mask) {
 	event_mask_ = p_mask;
 }
@@ -176,7 +180,11 @@ void VECSObserver::handle_event(vortaris::ObserverEventType p_type, vortaris::En
 	}
 
 	godot::Ref<VECSEntity> entity = VECSEntity::make(world_ ? &world_->core() : nullptr, p_entity);
-	if (_gdvirtual__script_each_overridden()) {
+	// A plain set_callback() callable takes precedence over a _script_each
+	// override; the C++ _each override point remains for native subclasses.
+	if (callback_.is_valid()) {
+		callback_.call(static_cast<int64_t>(ev), entity.ptr(), p_payload);
+	} else if (_gdvirtual__script_each_overridden()) {
 		_gdvirtual__script_each_call(static_cast<int64_t>(ev), entity.ptr(), p_payload);
 	} else {
 		_each(ev, p_entity, p_payload);
@@ -243,6 +251,8 @@ void VECSObserver::_notification(int p_what) {
 
 void VECSObserver::_bind_methods() {
 	using namespace godot;
+	ClassDB::bind_method(D_METHOD("set_callback", "callable"), &VECSObserver::set_callback);
+	ClassDB::bind_method(D_METHOD("get_callback"), &VECSObserver::get_callback);
 	ClassDB::bind_method(D_METHOD("set_events", "mask"), &VECSObserver::set_events);
 	ClassDB::bind_method(D_METHOD("get_events"), &VECSObserver::get_events);
 	ClassDB::bind_method(D_METHOD("on_added"), &VECSObserver::on_added);

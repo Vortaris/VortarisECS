@@ -8,6 +8,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/gdvirtual.gen.inc>
 #include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/variant.hpp>
 
@@ -54,6 +55,18 @@ public:
 	VECSObserver();
 
 	// --- config ---
+	// Sets a plain GDScript Callable to run for every delivered event, instead of
+	// overriding _script_each in a subclass. The callable signature is
+	//   func(event: int, entity: VECSEntity, payload: Variant) -> void
+	// This (plus the class being directly instantiable since 0.3.1) lets CHANT
+	// write `VECSObserver.new()` without subclassing, e.g.
+	//   var obs: VECSObserver = VECSObserver.new()
+	//   obs.set_callback(func(event, entity, payload): ...)
+	//   obs.on_changed(); obs.set_components(["Combatant"])
+	//   world.add_observer(obs)
+	// When both a callback and a _script_each override exist, the callback wins.
+	void set_callback(const godot::Callable &p_callable);
+	godot::Callable get_callback() const { return callback_; }
 	void set_events(int p_mask);
 	int get_events() const { return event_mask_; }
 	void on_added();
@@ -99,6 +112,7 @@ protected:
 
 private:
 	VECSWorld *world_ = nullptr;
+	godot::Callable callback_;
 	int event_mask_ = 0;
 	std::vector<vortaris::ComponentTypeId> component_filter_;
 	std::vector<godot::StringName> field_filter_;

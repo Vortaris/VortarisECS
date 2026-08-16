@@ -91,6 +91,48 @@
 				以显式 id（槽位 + 代数打包进 64 位值）创建实体。快照加载与网络复制用它保证 id 跨世界稳定。若 id 无效或槽位已被占用则返回空句柄。
 			</description>
 		</method>
+		<method name="create_observer">
+			<return type="VECSObserver" />
+			<param index="0" name="callable" type="Callable" />
+			<param index="1" name="opts" type="Dictionary" default="{}" />
+			<description>
+				One-call observer factory (0.3.1): creates a [VECSObserver], wires [param callable] as its callback, configures it from [param opts], and registers it with this world. The callback signature is [code]func(event: int, entity: VECSEntity, payload: Variant) -> void[/code] ([code]event[/code] is a [enum VECSObserver.Event] constant). Since 0.3.1 [VECSObserver] is a concrete class, so this replaces the old subclass-or-nothing observer usage.
+
+				[param opts] keys (all optional):
+				- [code]"events"[/code]: an int bitmask of [enum VECSObserver.Event], or an [Array] of names ([code]"added"[/code], [code]"removed"[/code], [code]"changed"[/code], [code]"matched"[/code], [code]"unmatched"[/code], [code]"custom"[/code]). Default: CHANGED.
+				- [code]"components"[/code]: [Array] of component names the observer watches (default: every component).
+				- [code]"fields"[/code]: [Array] of field names for the CHANGED field filter.
+				- [code]"match_components"[/code]: [Array] for MATCHED/UNMATCHED membership tracking.
+				- [code]"custom_event_name"[/code]: [String] filter for custom events.
+				- [code]"throttle_tick"[/code]: [int] change-tick throttle for CHANGED delivery.
+				- [code]"flush_mode"[/code]: [int] [enum VECSObserver.FlushMode].
+
+				Returns the observer node; the caller owns it — call [method Object.free] (which auto-unregisters) when done, or keep it for the world's lifetime and let [method shutdown] drop the dispatch.
+
+				一键观察者工厂（0.3.1）：创建 [VECSObserver]，把 [param callable] 作为其回调，按 [param opts] 配置，并注册到本世界。回调签名为 [code]func(event: int, entity: VECSEntity, payload: Variant) -> void[/code]（[code]event[/code] 是 [enum VECSObserver.Event] 常量）。自 0.3.1 起 [VECSObserver] 是具体类，因此这替代了旧的"必须子类化"的观察者用法。
+
+				[param opts] 键（均可选）：
+				- [code]"events"[/code]：int 位掩码形式的 [enum VECSObserver.Event]，或名称 [Array]（[code]"added"[/code]、[code]"removed"[/code]、[code]"changed"[/code]、[code]"matched"[/code]、[code]"unmatched"[/code]、[code]"custom"[/code]）。默认 CHANGED。
+				- [code]"components"[/code]：观察者关注的组件名 [Array]（默认：所有组件）。
+				- [code]"fields"[/code]：CHANGED 字段过滤器的字段名 [Array]。
+				- [code]"match_components"[/code]：用于 MATCHED/UNMATCHED 成员跟踪的 [Array]。
+				- [code]"custom_event_name"[/code]：自定义事件名 [String] 过滤。
+				- [code]"throttle_tick"[/code]：CHANGED 派发的变更 tick 节流 [int]。
+				- [code]"flush_mode"[/code]：[enum VECSObserver.FlushMode] [int]。
+
+				返回观察者节点；调用方拥有它——用 [method Object.free]（会自动注销）或保留到世界生命周期，由 [method shutdown] 清空派发。
+			</description>
+		</method>
+		<method name="create_with_components">
+			<return type="VECSEntity" />
+			<param index="0" name="def_id" type="int" />
+			<param index="1" name="components" type="Dictionary" />
+			<description>
+				Creates an entity (optionally with a preassigned id) and adds every component in [param components] in one call — a merge of [method create_entity] / [method create_entity_preassigned] + [method VECSEntity.add_component]. [param def_id] [code]&lt;= 0[/code] auto-assigns the id; a positive [param def_id] preassigns it (CHANT's "row to component dict" spawn helpers collapse to this). Absent component fields are filled with their schema default (zero / empty string / false / zeroed array slots), so callers only supply the fields they care about. Returns a handle to the new entity, or a null handle if creation failed (an unregistered component or an id conflict — nothing is left half-spawned).
+
+				一次调用创建实体（可选预分配 id）并添加 [param components] 中的所有组件——是 [method create_entity] / [method create_entity_preassigned] + [method VECSEntity.add_component] 的合并。[param def_id] [code]&lt;= 0[/code] 自动分配 id；正数 [param def_id] 预分配它（CHANT 的"行到组件字典"生成可收缩为这一调用）。缺失的组件字段按 schema 默认值填充（零 / 空串 / false / 归零数组槽位），因此调用方只需提供关心的字段。返回新实体句柄；创建失败（组件未注册或 id 冲突——不会留下半生成的实体）返回空句柄。
+			</description>
+		</method>
 		<method name="deserialize_snapshot">
 			<return type="bool" />
 			<param index="0" name="data" type="PackedByteArray" />
@@ -283,6 +325,28 @@
 				Unsubscribes a field subscription created by [method on_field_changed].
 
 				注销由 [method on_field_changed] 创建的字段订阅。
+			</description>
+		</method>
+		<method name="on_changed">
+			<return type="VECSObserver" />
+			<param index="0" name="comp" type="String" />
+			<param index="1" name="opts" type="Dictionary" />
+			<description>
+				Thin convenience over [method create_observer] for the per-frame-poll replacement:
+
+				[codeblock]
+				world.on_changed("Combatant", {"fields": ["hp"], "callable": cb})
+				[/codeblock]
+
+				Creates a CHANGED-only observer watching component [param comp]. [param opts] may carry [code]"fields"[/code] (Array), [code]"throttle_tick"[/code] (int) and [code]"callable"[/code] (the callback; when absent no events are delivered). The callback receives [code](event: int, entity: VECSEntity, payload: Variant)[/code]. Returns the observer node (caller owns it; free to unregister).
+
+				[method create_observer] 的便捷封装，用于替代每帧轮询：
+
+				[codeblock]
+				world.on_changed("Combatant", {"fields": ["hp"], "callable": cb})
+				[/codeblock]
+
+				创建只关注 CHANGED 事件、监听组件 [param comp] 的观察者。[param opts] 可携带 [code]"fields"[/code]（Array）、[code]"throttle_tick"[/code]（int）与 [code]"callable"[/code]（回调；缺失时不派发任何事件）。回调收到 [code](event: int, entity: VECSEntity, payload: Variant)[/code]。返回观察者节点（调用方拥有它；free 可注销）。
 			</description>
 		</method>
 		<method name="on_field_changed">

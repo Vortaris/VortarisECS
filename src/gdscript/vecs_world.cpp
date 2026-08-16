@@ -193,6 +193,36 @@ godot::Ref<VECSEntity> VECSWorld::spawn(const godot::Dictionary &p_components) {
 	return spawned[0];
 }
 
+godot::Ref<VECSEntity> VECSWorld::create_with_components(int64_t p_def_id, const godot::Dictionary &p_components) {
+	godot::Ref<VECSEntity> ent;
+	if (p_def_id > 0) {
+		ent = create_entity_preassigned(p_def_id);
+	} else {
+		ent = create_entity();
+	}
+	if (!ent.is_valid()) {
+		return ent;
+	}
+	const godot::Array comp_names = p_components.keys();
+	// Pre-flight: every named component must be registered, otherwise the entity
+	// would be left partially initialized ("ghost entity").
+	for (int j = 0; j < comp_names.size(); ++j) {
+		const godot::String cname = comp_names[j];
+		if (core_->registry().id_of(godot::StringName(cname)) == vortaris::INVALID_COMPONENT_TYPE) {
+			ERR_PRINT("VortarisECS: create_with_components component '" + cname + "' is not registered; entity not spawned.");
+			core_->destroy_entity(ent->entity());
+			return godot::Ref<VECSEntity>();
+		}
+	}
+	for (int j = 0; j < comp_names.size(); ++j) {
+		const godot::String cname = comp_names[j];
+		// add_component fills absent fields with their schema default (zero /
+		// empty string / false / zeroed array slots) via component_dict_to_bytes.
+		ent->add_component(cname, p_components[cname]);
+	}
+	return ent;
+}
+
 void VECSWorld::each(const godot::Array &p_components, const godot::Callable &p_callable) {
 	std::vector<vortaris::ComponentTypeId> ids;
 	for (int i = 0; i < p_components.size(); ++i) {
@@ -278,6 +308,87 @@ void VECSWorld::add_observer(VECSObserver *p_observer) {
 	if (p_observer->has_match_events()) {
 		p_observer->seed_membership();
 	}
+}
+
+VECSObserver *VECSWorld::create_observer(const godot::Callable &p_callable, const godot::Dictionary &p_opts) {
+	VECSObserver *obs = memnew(VECSObserver);
+	obs->set_callback(p_callable);
+
+	if (p_opts.has("events")) {
+		const godot::Variant ev = p_opts["events"];
+		if (ev.get_type() == godot::Variant::INT) {
+			obs->set_events(static_cast<int>(static_cast<int64_t>(ev)));
+		} else if (ev.get_type() == godot::Variant::ARRAY) {
+			const godot::Array names = ev;
+			int mask = 0;
+			for (int i = 0; i < names.size(); ++i) {
+				const godot::String name = names[i];
+				if (name == "added") {
+					mask |= vortaris::EVENT_ADDED;
+				} else if (name == "removed") {
+					mask |= vortaris::EVENT_REMOVED;
+				} else if (name == "changed") {
+					mask |= vortaris::EVENT_CHANGED;
+				} else if (name == "matched") {
+					mask |= vortaris::EVENT_MATCHED;
+				} else if (name == "unmatched") {
+					mask |= vortaris::EVENT_UNMATCHED;
+				} else if (name == "custom") {
+					mask |= vortaris::EVENT_CUSTOM;
+				}
+			}
+			obs->set_events(mask);
+		}
+	} else {
+		obs->on_changed(); // default: CHANGED events
+	}
+	if (p_opts.has("components")) {
+		obs->set_components(p_opts["components"]);
+	}
+	if (p_opts.has("fields")) {
+		obs->set_fields(p_opts["fields"]);
+	}
+	if (p_opts.has("match_components")) {
+		obs->set_match_components(p_opts["match_components"]);
+	}
+	if (p_opts.has("custom_event_name")) {
+		obs->set_custom_event_name(p_opts["custom_event_name"]);
+	}
+	if (p_opts.has("throttle_tick")) {
+		obs->set_throttle_tick(static_cast<int64_t>(p_opts["throttle_tick"]));
+	}
+	if (p_opts.has("flush_mode")) {
+		obs->set_flush_mode(static_cast<int>(static_cast<int64_t>(p_opts["flush_mode"])));
+	}
+	add_observer(obs);
+	return obs;
+}
+
+VECSObserver *VECSWorld::on_changed(const godot::String &p_comp, const godot::Dictionary &p_opts) {
+	godot::Dictionary o;
+	godot::Array events;
+	events.append("changed");
+	o["events"] = events;
+	godot::Array comps;
+	if (!p_comp.is_empty()) {
+		comps.append(p_comp);
+	}
+	o["components"] = comps;
+	// Accept both the singular CHANT spelling ("field") and the plural
+	// ("fields") used by VECSObserver.set_fields.
+	if (p_opts.has("fields")) {
+		o["fields"] = p_opts["fields"];
+	} else if (p_opts.has("field")) {
+		o["fields"] = p_opts["field"];
+	}
+	if (p_opts.has("throttle_tick")) {
+		o["throttle_tick"] = p_opts["throttle_tick"];
+	}
+	godot::Callable cb;
+	if (p_opts.has("callable")) {
+		cb = p_opts["callable"];
+	}
+	return create_observer(cb, o);
 }
 
 void VECSWorld::remove_observer(VECSObserver *p_observer) {
@@ -1101,6 +1212,7 @@ void VECSWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("query"), &VECSWorld::query);
 	ClassDB::bind_method(D_METHOD("commands"), &VECSWorld::commands);
 	ClassDB::bind_method(D_METHOD("spawn", "components"), &VECSWorld::spawn);
+	ClassDB::bind_method(D_METHOD("create_with_components", "def_id", "components"), &VECSWorld::create_with_components);
 	ClassDB::bind_method(D_METHOD("each", "components", "callable"), &VECSWorld::each);
 	ClassDB::bind_method(D_METHOD("get_field", "entity", "comp", "field", "default"), &VECSWorld::get_field, DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("set_field", "entity", "comp", "field", "value"), &VECSWorld::set_field);
@@ -1110,6 +1222,8 @@ void VECSWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("system_count"), &VECSWorld::system_count);
 	ClassDB::bind_method(D_METHOD("add_observer", "observer"), &VECSWorld::add_observer);
 	ClassDB::bind_method(D_METHOD("remove_observer", "observer"), &VECSWorld::remove_observer);
+	ClassDB::bind_method(D_METHOD("create_observer", "callable", "opts"), &VECSWorld::create_observer, DEFVAL(Dictionary()));
+	ClassDB::bind_method(D_METHOD("on_changed", "comp", "opts"), &VECSWorld::on_changed);
 	ClassDB::bind_method(D_METHOD("emit_event", "name", "entity", "payload"), &VECSWorld::emit_event, DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("on_field_changed", "comp", "field", "callable"), &VECSWorld::on_field_changed);
 	ClassDB::bind_method(D_METHOD("off", "subscription_id"), &VECSWorld::off);

@@ -6,11 +6,33 @@
 		响应式、事件驱动的观察者，对组件变化做出反应。
 	</brief_description>
 	<description>
-		[b]VECSObserver[/b] subscribes to ECS events (component ADDED / REMOVED / CHANGED, membership MATCHED / UNMATCHED, and custom events). When a matching event fires, the observer's callback runs — GDScript observers override [method _script_each], C++ observers override [code]_each[/code].
+		[b]VECSObserver[/b] subscribes to ECS events (component ADDED / REMOVED / CHANGED, membership MATCHED / UNMATCHED, and custom events). When a matching event fires, the observer's callback runs. Since 0.3.1 [b]VECSObserver is a concrete class[/b], so it can be instantiated directly from GDScript and driven with a plain [method set_callback] callable — no subclass needed:
+
+		[codeblock]
+		var obs: VECSObserver = VECSObserver.new()
+		obs.set_callback(func(event: int, entity: VECSEntity, payload: Variant) -> void: ...)
+		obs.on_changed()
+		obs.set_components(["Combatant"])
+		obs.set_fields(["hp"])
+		world.add_observer(obs)
+		[/codeblock]
+
+		The [method VECSWorld.create_observer] / [method VECSWorld.on_changed] factories do all of that in one call. Subclassing still works: GDScript observers override [method _script_each], C++ observers override [code]_each[/code]. When both a [method set_callback] callable and a [method _script_each] override exist, the callable wins.
 
 		Subscribe to event kinds by calling the [code]on_*[/code] helpers (e.g. [method on_added]) or by setting [member events] as a bitmask. Filter by component type with [method set_components]; for MATCHED/UNMATCHED use [method set_match_components]. Register the observer with [method VECSWorld.add_observer].
 
-		[b]VECSObserver[/b] 订阅 ECS 事件（组件 ADDED / REMOVED / CHANGED、成员 MATCHED / UNMATCHED，以及自定义事件）。匹配事件触发时执行观察者的回调——GDScript 观察者覆写 [method _script_each]，C++ 观察者覆写 [code]_each[/code]。
+		[b]VECSObserver[/b] 订阅 ECS 事件（组件 ADDED / REMOVED / CHANGED、成员 MATCHED / UNMATCHED，以及自定义事件）。匹配事件触发时执行观察者的回调。自 0.3.1 起 [b]VECSObserver 是具体类[/b]，可直接从 GDScript 实例化，并用普通 [method set_callback] 回调驱动——无需子类化：
+
+		[codeblock]
+		var obs: VECSObserver = VECSObserver.new()
+		obs.set_callback(func(event: int, entity: VECSEntity, payload: Variant) -> void: ...)
+		obs.on_changed()
+		obs.set_components(["Combatant"])
+		obs.set_fields(["hp"])
+		world.add_observer(obs)
+		[/codeblock]
+
+		[method VECSWorld.create_observer] / [method VECSWorld.on_changed] 工厂可在一次调用中完成上述全部配置。子类化仍然可用：GDScript 观察者覆写 [method _script_each]，C++ 观察者覆写 [code]_each[/code]。当同时存在 [method set_callback] 回调与 [method _script_each] 覆写时，回调优先。
 
 		通过调用 [code]on_*[/code] 辅助方法（如 [method on_added]）或以位掩码设置 [member events] 来订阅事件类型。用 [method set_components] 按组件类型过滤；MATCHED/UNMATCHED 用 [method set_match_components]。用 [method VECSWorld.add_observer] 注册观察者。
 	</description>
@@ -51,6 +73,14 @@
 				Returns the membership query set with [method set_match_components].
 
 				返回用 [method set_match_components] 设置的成员查询。
+			</description>
+		</method>
+		<method name="get_callback" qualifiers="const">
+			<return type="Callable" />
+			<description>
+				Returns the callback set with [method set_callback], or an empty [Callable] if none was set.
+
+				返回用 [method set_callback] 设置的回调；未设置则返回空 [Callable]。
 			</description>
 		</method>
 		<method name="get_throttle_tick" qualifiers="const">
@@ -115,6 +145,15 @@
 				Subscribes to UNMATCHED events (an entity left the membership query set).
 
 				订阅 UNMATCHED 事件（实体离开成员查询集合）。
+			</description>
+		</method>
+		<method name="set_callback">
+			<return type="void" />
+			<param index="0" name="callable" type="Callable" />
+			<description>
+				Sets a plain GDScript [Callable] to run for every delivered event, instead of overriding [method _script_each] in a subclass. The callable signature is [code]func(event: int, entity: VECSEntity, payload: Variant) -> void[/code]. Combined with [method VECSObserver.new] this lets scripts build observers without subclassing. When a callback is set it takes precedence over a [method _script_each] override.
+
+				设置一个普通 GDScript [Callable]，在每个已派发事件时运行，替代在子类中覆写 [method _script_each]。回调签名为 [code]func(event: int, entity: VECSEntity, payload: Variant) -> void[/code]。与 [method VECSObserver.new] 结合，脚本无需子类化即可构建观察者。设置回调后它优先于 [method _script_each] 覆写。
 			</description>
 		</method>
 		<method name="set_components">
