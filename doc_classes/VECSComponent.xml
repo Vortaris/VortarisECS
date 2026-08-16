@@ -18,6 +18,16 @@
 		<link title="Quickstart">https://github.com/Vortaris/VortarisECS/blob/main/docs/quickstart.md</link>
 	</tutorials>
 	<methods>
+		<method name="field_contains" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="value" type="Variant" />
+			<description>
+				Returns [code]true[/code] when the field [param name] equals [param value] (scalar fields) or when any element of a fixed-array field equals it. Replaces the "rebuild the array and scan for a 0-sentinel" idiom with one call. Comparison uses GDScript [code]==[/code] semantics, so an F32 array element matches an int [code]0[/code] and vice versa.
+
+				当字段 [param name] 等于 [param value]（标量字段）或固定数组字段的任一元素等于它时返回 [code]true[/code]。用一次调用替代"重建数组并扫描 0 哨兵"的写法。比较采用 GDScript [code]==[/code] 语义，因此 F32 数组元素可与 int [code]0[/code] 互相匹配。
+			</description>
+		</method>
 		<method name="get_array_element" qualifiers="const">
 			<return type="Variant" />
 			<param index="0" name="name" type="String" />
@@ -26,6 +36,15 @@
 				Reads one element of a fixed-array field ([code]count &gt; 1[/code]). Returns a null [Variant] for scalar fields, out-of-range indices, or unknown fields.
 
 				读取固定数组字段（[code]count &gt; 1[/code]）的单个元素。标量字段、越界下标或未知字段返回空 [Variant]。
+			</description>
+		</method>
+		<method name="get_bool" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Typed accessor: reads the field [param name] and returns it as a [bool]. Numeric fields coerce (non-zero is [code]true[/code]). A missing component/field returns [code]false[/code]. Lets GDScript callers drop explicit [code]bool()[/code] casts.
+
+				类型化访问器：读取字段 [param name] 并以 [bool] 返回。数字字段会强转（非零为 [code]true[/code]）。组件/字段缺失返回 [code]false[/code]。让 GDScript 调用方免去显式 [code]bool()[/code] 强转。
 			</description>
 		</method>
 		<method name="get_field" qualifiers="const">
@@ -55,12 +74,48 @@
 				以名称到值的 [Dictionary] 形式返回该组件的所有字段。
 			</description>
 		</method>
+		<method name="get_float" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Typed accessor: reads the field [param name] and returns it as a [float]. Integer fields widen; bool coerces to [code]1.0[/code]/[code]0.0[/code]. A missing component/field returns [code]0.0[/code]. Lets GDScript callers drop explicit [code]float()[/code] casts.
+
+				类型化访问器：读取字段 [param name] 并以 [float] 返回。整数字段拓宽；bool 强转为 [code]1.0[/code]/[code]0.0[/code]。组件/字段缺失返回 [code]0.0[/code]。让 GDScript 调用方免去显式 [code]float()[/code] 强转。
+			</description>
+		</method>
+		<method name="get_int" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Typed accessor: reads the field [param name] and returns it as an [int]. Float fields truncate; bool coerces to [code]1[/code]/[code]0[/code]. A missing component/field returns [code]0[/code]. Lets GDScript callers drop explicit [code]int()[/code] casts (CHANT had 162 of these).
+
+				类型化访问器：读取字段 [param name] 并以 [int] 返回。浮点字段截断；bool 强转为 [code]1[/code]/[code]0[/code]。组件/字段缺失返回 [code]0[/code]。让 GDScript 调用方免去显式 [code]int()[/code] 强转（CHANT 有 162 处）。
+			</description>
+		</method>
+		<method name="get_string" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Typed accessor: reads the field [param name] and returns it as a [String]. Non-string fields are stringified like GDScript [code]str()[/code]. A missing component/field returns an empty [String]. Lets GDScript callers drop explicit [code]str()[/code] casts.
+
+				类型化访问器：读取字段 [param name] 并以 [String] 返回。非字符串字段按 GDScript [code]str()[/code] 方式字符串化。组件/字段缺失返回空 [String]。让 GDScript 调用方免去显式 [code]str()[/code] 强转。
+			</description>
+		</method>
 		<method name="get_type_name" qualifiers="const">
 			<return type="String" />
 			<description>
 				Returns the name of the component type this accessor refers to.
 
 				返回该访问器所指组件类型的名称。
+			</description>
+		</method>
+		<method name="get_vector" qualifiers="const">
+			<return type="Variant" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Typed accessor: reads the field [param name] and returns it unchanged when it is a [Vector2]/[Vector2i]/[Vector3]/[Vector3i]/[Vector4]/[Vector4i]. Returns a null [Variant] for non-vector or missing fields. Lets GDScript callers drop explicit [code]Vector3()[/code] casts.
+
+				类型化访问器：当字段 [param name] 是 [Vector2]/[Vector2i]/[Vector3]/[Vector3i]/[Vector4]/[Vector4i] 时原样返回。非向量或缺失字段返回空 [Variant]。让 GDScript 调用方免去显式 [code]Vector3()[/code] 强转。
 			</description>
 		</method>
 		<method name="is_valid" qualifiers="const">

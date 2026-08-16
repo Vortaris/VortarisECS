@@ -107,6 +107,31 @@ void VECSEntity::setf(const godot::String &p_comp, const godot::String &p_field,
 	}
 }
 
+int64_t VECSEntity::getf_int(const godot::String &p_comp, const godot::String &p_field) const {
+	godot::Ref<VECSComponent> comp = get_component(p_comp);
+	return comp.is_valid() ? comp->get_int(p_field) : 0;
+}
+
+double VECSEntity::getf_float(const godot::String &p_comp, const godot::String &p_field) const {
+	godot::Ref<VECSComponent> comp = get_component(p_comp);
+	return comp.is_valid() ? comp->get_float(p_field) : 0.0;
+}
+
+bool VECSEntity::getf_bool(const godot::String &p_comp, const godot::String &p_field) const {
+	godot::Ref<VECSComponent> comp = get_component(p_comp);
+	return comp.is_valid() && comp->get_bool(p_field);
+}
+
+godot::String VECSEntity::getf_string(const godot::String &p_comp, const godot::String &p_field) const {
+	godot::Ref<VECSComponent> comp = get_component(p_comp);
+	return comp.is_valid() ? comp->get_string(p_field) : godot::String();
+}
+
+godot::Variant VECSEntity::getf_vector(const godot::String &p_comp, const godot::String &p_field) const {
+	godot::Ref<VECSComponent> comp = get_component(p_comp);
+	return comp.is_valid() ? comp->get_vector(p_field) : godot::Variant();
+}
+
 bool VECSEntity::equals(const godot::Ref<VECSEntity> &p_other) const {
 	return p_other.is_valid() && id_ == p_other->id_;
 }
@@ -126,6 +151,11 @@ void VECSEntity::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("remove_component", "type_name"), &VECSEntity::remove_component);
 	ClassDB::bind_method(D_METHOD("getf", "comp", "field", "default"), &VECSEntity::getf, DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("setf", "comp", "field", "value"), &VECSEntity::setf);
+	ClassDB::bind_method(D_METHOD("getf_int", "comp", "field"), &VECSEntity::getf_int);
+	ClassDB::bind_method(D_METHOD("getf_float", "comp", "field"), &VECSEntity::getf_float);
+	ClassDB::bind_method(D_METHOD("getf_bool", "comp", "field"), &VECSEntity::getf_bool);
+	ClassDB::bind_method(D_METHOD("getf_string", "comp", "field"), &VECSEntity::getf_string);
+	ClassDB::bind_method(D_METHOD("getf_vector", "comp", "field"), &VECSEntity::getf_vector);
 	ClassDB::bind_method(D_METHOD("equals", "other"), &VECSEntity::equals);
 	ClassDB::bind_method(D_METHOD("hash_value"), &VECSEntity::hash_value);
 }

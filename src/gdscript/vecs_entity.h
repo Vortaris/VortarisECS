@@ -40,6 +40,15 @@ public:
 	// Returns `p_default` when the component/field is missing (null Variant by default).
 	godot::Variant getf(const godot::String &p_comp, const godot::String &p_field, const godot::Variant &p_default = godot::Variant()) const;
 	void setf(const godot::String &p_comp, const godot::String &p_field, const godot::Variant &p_value);
+	// Typed one-call field sugar (0.3.1): e.getf_int("Combatant", "hp") reads the
+	// field as an int, dropping the explicit int()/float()/bool()/str() casts in
+	// GDScript. Delegates to the matching VECSComponent typed getter; a missing
+	// component/field returns the type's zero value (0 / 0.0 / false / "" / null).
+	int64_t getf_int(const godot::String &p_comp, const godot::String &p_field) const;
+	double getf_float(const godot::String &p_comp, const godot::String &p_field) const;
+	bool getf_bool(const godot::String &p_comp, const godot::String &p_field) const;
+	godot::String getf_string(const godot::String &p_comp, const godot::String &p_field) const;
+	godot::Variant getf_vector(const godot::String &p_comp, const godot::String &p_field) const;
 	bool equals(const godot::Ref<VECSEntity> &p_other) const;
 	int64_t hash_value() const;
 

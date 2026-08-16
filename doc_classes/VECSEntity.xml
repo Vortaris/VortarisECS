@@ -73,6 +73,56 @@
 				[method get_component].get_field 的便捷语法：一次调用读取单个字段。若组件或字段不存在则返回 [param default]（默认是空 [Variant]）。
 			</description>
 		</method>
+		<method name="getf_bool" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="comp" type="String" />
+			<param index="1" name="field" type="String" />
+			<description>
+				Typed one-call field sugar: reads [code]comp.field[/code] and returns it as a [bool], delegating to [method VECSComponent.get_bool]. A missing component/field returns [code]false[/code]. Drops the explicit [code]bool()[/code] cast.
+
+				类型化一键字段语法：读取 [code]comp.field[/code] 并以 [bool] 返回，委托给 [method VECSComponent.get_bool]。组件/字段缺失返回 [code]false[/code]。免去显式 [code]bool()[/code] 强转。
+			</description>
+		</method>
+		<method name="getf_float" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="comp" type="String" />
+			<param index="1" name="field" type="String" />
+			<description>
+				Typed one-call field sugar: reads [code]comp.field[/code] and returns it as a [float], delegating to [method VECSComponent.get_float]. A missing component/field returns [code]0.0[/code]. Drops the explicit [code]float()[/code] cast.
+
+				类型化一键字段语法：读取 [code]comp.field[/code] 并以 [float] 返回，委托给 [method VECSComponent.get_float]。组件/字段缺失返回 [code]0.0[/code]。免去显式 [code]float()[/code] 强转。
+			</description>
+		</method>
+		<method name="getf_int" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="comp" type="String" />
+			<param index="1" name="field" type="String" />
+			<description>
+				Typed one-call field sugar: reads [code]comp.field[/code] and returns it as an [int], delegating to [method VECSComponent.get_int]. A missing component/field returns [code]0[/code]. Drops the explicit [code]int()[/code] cast.
+
+				类型化一键字段语法：读取 [code]comp.field[/code] 并以 [int] 返回，委托给 [method VECSComponent.get_int]。组件/字段缺失返回 [code]0[/code]。免去显式 [code]int()[/code] 强转。
+			</description>
+		</method>
+		<method name="getf_string" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="comp" type="String" />
+			<param index="1" name="field" type="String" />
+			<description>
+				Typed one-call field sugar: reads [code]comp.field[/code] and returns it as a [String], delegating to [method VECSComponent.get_string]. A missing component/field returns an empty [String]. Drops the explicit [code]str()[/code] cast.
+
+				类型化一键字段语法：读取 [code]comp.field[/code] 并以 [String] 返回，委托给 [method VECSComponent.get_string]。组件/字段缺失返回空 [String]。免去显式 [code]str()[/code] 强转。
+			</description>
+		</method>
+		<method name="getf_vector" qualifiers="const">
+			<return type="Variant" />
+			<param index="0" name="comp" type="String" />
+			<param index="1" name="field" type="String" />
+			<description>
+				Typed one-call field sugar: reads [code]comp.field[/code] and returns it unchanged when it is a vector type, delegating to [method VECSComponent.get_vector]. Returns a null [Variant] for non-vector or missing fields. Drops the explicit [code]Vector3()[/code] cast.
+
+				类型化一键字段语法：读取 [code]comp.field[/code] 并在其为向量类型时原样返回，委托给 [method VECSComponent.get_vector]。非向量或缺失字段返回空 [Variant]。免去显式 [code]Vector3()[/code] 强转。
+			</description>
+		</method>
 		<method name="has_component" qualifiers="const">
 			<return type="bool" />
 			<param index="0" name="type_name" type="String" />
