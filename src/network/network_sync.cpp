@@ -229,6 +229,9 @@ void VECSSnapshotReplication::on_entity_component_removed(VECSNetworkSync &p_ns,
 		if (!any) {
 			tracked_.erase(p_e);
 			dirty_.erase(p_e);
+			// Audit fix: the per-entity throttle state must die with the entity,
+			// otherwise next_send_tick_ grows without bound over long runs.
+			next_send_tick_.erase(p_e);
 			pending_despawn_.insert(p_e);
 		}
 	}
@@ -420,6 +423,8 @@ void VECSSnapshotReplication::tick(VECSNetworkSync &p_ns, double p_delta) {
 			vortaris::BinaryBuffer buf;
 			buf.write_u64(e.id);
 			p_ns.send_packet(SyncPacketKind::Despawn, buf);
+			// Audit fix: release throttle state for good once the despawn goes out.
+			next_send_tick_.erase(e);
 		}
 		if (vortaris::verbose_active()) {
 			vortaris::log_verbose("network despawn " + godot::String::num_int64(static_cast<int64_t>(pending_despawn_.size())) + " entities");

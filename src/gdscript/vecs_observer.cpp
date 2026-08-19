@@ -123,6 +123,11 @@ void VECSObserver::set_flush_mode(int p_v) {
 
 void VECSObserver::set_world(VECSWorld *p_world) {
 	world_ = p_world;
+	// Capture the world's identity NOW (audit fix): NOTIFICATION_PREDELETE may
+	// run after the world is already freed, and calling get_instance_id() on a
+	// freed object is itself a use-after-free. The stored id lets the predelete
+	// path do the liveness check without ever touching the raw pointer blindly.
+	world_instance_id_ = (p_world != nullptr) ? p_world->get_instance_id() : 0;
 }
 
 bool VECSObserver::has_match_events() const {
@@ -239,13 +244,17 @@ void VECSObserver::evaluate_match(vortaris::Entity p_entity) {
 void VECSObserver::_notification(int p_what) {
 	if (p_what == NOTIFICATION_PREDELETE && world_) {
 		// The VECSWorld singleton may be freed before this node (extension unload
-		// order is not guaranteed). Resolve the world's instance id through the
-		// engine so a stale pointer does not become a use-after-free.
-		GDExtensionObjectPtr live = godot::gdextension_interface::object_get_instance_from_id(world_->get_instance_id());
+		// order is not guaranteed). Resolve the stored instance id (captured at
+		// set_world time — never dereference world_ before the liveness check,
+		// that would be a use-after-free) so a stale pointer cannot be touched.
+		GDExtensionObjectPtr live = world_instance_id_ != 0
+				? godot::gdextension_interface::object_get_instance_from_id(world_instance_id_)
+				: nullptr;
 		if (live != nullptr) {
 			world_->remove_observer(this);
 		}
 		world_ = nullptr;
+		world_instance_id_ = 0;
 	}
 }
 

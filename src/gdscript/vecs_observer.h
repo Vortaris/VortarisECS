@@ -112,6 +112,9 @@ protected:
 
 private:
 	VECSWorld *world_ = nullptr;
+	// Captured at set_world() time: lets the PREDELETE liveness check avoid
+	// dereferencing world_ when the world was already freed (audit fix).
+	uint64_t world_instance_id_ = 0;
 	godot::Callable callback_;
 	int event_mask_ = 0;
 	std::vector<vortaris::ComponentTypeId> component_filter_;
