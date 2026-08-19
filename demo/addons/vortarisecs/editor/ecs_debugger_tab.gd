@@ -49,6 +49,7 @@ var plugin: EditorDebuggerPlugin = null
 var session_id: int = -1
 
 const ResizableTree := preload("res://addons/vortarisecs/editor/ecs_resizable_tree.gd")
+const TreeCopy := preload("res://addons/vortarisecs/editor/ecs_tree_copy.gd")
 
 const DEFAULT_AUTO_REFRESH_INTERVAL := 1.0
 const DEFAULT_MAX_ENTITIES := 500
@@ -338,6 +339,8 @@ func _make_tree(column_titles: Array, widths: Array) -> Tree:
 		tree.set_column_custom_minimum_width(i, widths[i] if i < widths.size() else 80)
 		# Never clip a dragged column's text (matches VECSResizableTree).
 		tree.set_column_clip_content(i, false)
+	# Issue #6: entity ids / field values / any cell must be copyable.
+	tree.set_meta("vecs_copy_helper", TreeCopy.new(tree))
 	return tree
 
 

@@ -19,6 +19,8 @@ extends VBoxContainer
 
 var _world: VECSWorld = null
 
+const TreeCopy := preload("res://addons/vortarisecs/editor/ecs_tree_copy.gd")
+
 @onready var stats_label: Label = %StatsLabel
 @onready var refresh_button: Button = %RefreshButton
 @onready var entity_tree: Tree = %EntityTree
@@ -29,6 +31,12 @@ var _world: VECSWorld = null
 func _ready() -> void:
 	refresh_button.pressed.connect(_refresh)
 	dump_button.pressed.connect(_dump_snapshot)
+	# Issue #6: entity ids / component / field values must be copyable.
+	entity_tree.set_meta("vecs_copy_helper", TreeCopy.new(entity_tree))
+	# The two info lines are selectable so their text can be copied too.
+	stats_label.mouse_filter = Control.MOUSE_FILTER_STOP
+	stats_label.text_selection_enabled = true
+	snapshot_label.text_selection_enabled = true
 	_resolve_world()
 
 
