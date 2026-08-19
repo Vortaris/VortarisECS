@@ -577,6 +577,53 @@ void VECSSnapshotReplication::apply_full_state(VECSNetworkSync &p_ns, const vort
 	if (!in.read_u32(n)) {
 		return;
 	}
+	// Pass 1 (issue #4): pre-flight every entity id BEFORE mutating the world.
+	// validate_packet already guarantees structure/byte-bounds/schema presence,
+	// so the only mid-apply failure left was create_entity_preassigned refusing
+	// an id (malformed slot / runaway guard) — by which point earlier entities
+	// in the packet had already been destroyed+rebuilt, leaving a half-applied
+	// world. Checking all ids up front makes the apply phase uninterruptible.
+	{
+		vortaris::BinaryBuffer scan = in;
+		std::unordered_set<uint64_t> seen;
+		for (uint32_t i = 0; i < n; ++i) {
+			uint64_t id;
+			if (!scan.read_u64(id)) {
+				return;
+			}
+			const uint32_t slot = static_cast<uint32_t>(id & 0xFFFFFFFFu) - 1;
+			if (slot == 0xFFFFFFFFu || slot >= (1u << 24)) {
+				return; // create_entity_preassigned would refuse this id
+			}
+			if (!seen.insert(id).second) {
+				// Duplicate id inside one packet: sequential apply would
+				// destroy+rebuild it twice, but the intent is ambiguous — reject
+				// the whole packet instead of guessing.
+				return;
+			}
+			uint16_t ncomp;
+			if (!scan.read_u16(ncomp)) {
+				return;
+			}
+			for (uint16_t j = 0; j < ncomp; ++j) {
+				uint32_t t;
+				if (!scan.read_u32(t)) {
+					return;
+				}
+				const vortaris::ComponentSchema *s = vortaris::ComponentRegistry::instance().schema_of(t);
+				if (!s) {
+					return;
+				}
+				const size_t sz = vortaris::serialized_component_size(*s);
+				if (scan.pos() + sz > scan.size()) {
+					return;
+				}
+				scan.seek(scan.pos() + sz);
+			}
+		}
+	}
+	// Pass 2: apply. Every read and every create is now guaranteed to succeed,
+	// so the world transitions from the old state to the new one atomically.
 	std::unordered_set<vortaris::Entity> incoming;
 	for (uint32_t i = 0; i < n; ++i) {
 		uint64_t id;

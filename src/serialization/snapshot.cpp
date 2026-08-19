@@ -1,11 +1,13 @@
 #include "snapshot.h"
 
 #include <algorithm>
+#include <unordered_set>
 
 #include "../core/archetype.h"
 #include "../core/component_registry.h"
 #include "../core/entity.h"
 #include "../core/world.h"
+#include "component_serializer.h"
 
 namespace vortaris {
 
@@ -39,7 +41,60 @@ void serialize_world_snapshot(const World &p_world, BinaryBuffer &r_out) {
 bool deserialize_world_snapshot(World &p_world, BinaryBuffer &r_in) {
 	const ComponentRegistry &registry = ComponentRegistry::instance();
 
-	// Loading a snapshot replaces the whole world.
+	// --- Pass 1: validation-only walk (issue #4). A corrupt snapshot must not
+	// erase the live world: the old code cleared first and then parsed, so a
+	// failure mid-packet left an empty or half-populated world. Every read and
+	// every id is checked here while the world stays untouched; only a fully
+	// valid snapshot proceeds to pass 2 (where no read can fail).
+	{
+		BinaryBuffer in = r_in;
+		uint16_t version;
+		if (!in.read_u16(version) || version != SNAPSHOT_VERSION) {
+			return false;
+		}
+		uint32_t count;
+		if (!in.read_u32(count)) {
+			return false;
+		}
+		std::unordered_set<uint64_t> ids;
+		for (uint32_t i = 0; i < count; ++i) {
+			uint64_t id;
+			if (!in.read_u64(id)) {
+				return false;
+			}
+			// Reject ids create_entity_preassigned would refuse (malformed slot /
+			// beyond the runaway guard) and duplicate ids inside one snapshot.
+			const uint32_t slot = static_cast<uint32_t>(id & 0xFFFFFFFFu) - 1;
+			if (slot == 0xFFFFFFFFu || slot >= (1u << 24)) {
+				return false;
+			}
+			if (!ids.insert(id).second) {
+				return false;
+			}
+			uint16_t ncomp;
+			if (!in.read_u16(ncomp)) {
+				return false;
+			}
+			for (uint16_t j = 0; j < ncomp; ++j) {
+				uint32_t t;
+				if (!in.read_u32(t)) {
+					return false;
+				}
+				const ComponentSchema *s = registry.schema_of(t);
+				if (!s) {
+					return false;
+				}
+				const size_t sz = serialized_component_size(*s);
+				if (in.pos() + sz > in.size()) {
+					return false;
+				}
+				in.seek(in.pos() + sz);
+			}
+		}
+	}
+
+	// --- Pass 2: apply. Loading a snapshot replaces the whole world; safe to
+	// clear now that the payload is known-good.
 	p_world.clear();
 
 	uint16_t version;
