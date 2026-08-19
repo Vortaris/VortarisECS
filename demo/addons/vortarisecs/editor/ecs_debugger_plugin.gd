@@ -46,8 +46,15 @@ func _setup_session(session_id: int) -> void:
 	# connecting), so wait for the `started` signal before requesting data.
 	# If it is already active (e.g. the plugin was re-registered after the game
 	# connected) the `started` signal will never fire — start immediately.
-	session.started.connect(_on_session_started.bind(session_id))
-	session.stopped.connect(_on_session_stopped.bind(session_id))
+	# Guard against double-connect: Godot 4.7 reuses debugger sessions, and if
+	# _setup_session ever runs twice for the same session the bound callables
+	# would otherwise stack up (each started/stopped handled N times).
+	var started_cb := _on_session_started.bind(session_id)
+	var stopped_cb := _on_session_stopped.bind(session_id)
+	if not session.started.is_connected(started_cb):
+		session.started.connect(started_cb)
+	if not session.stopped.is_connected(stopped_cb):
+		session.stopped.connect(stopped_cb)
 	if session.is_active():
 		_on_session_started(session_id)
 
@@ -62,16 +69,11 @@ func _on_session_stopped(session_id: int) -> void:
 	var tab = _tabs.get(session_id)
 	if is_instance_valid(tab):
 		tab.set_connected(false)
-		# Drop the tab entirely (E6): a stopped session must not leave a dangling
-		# "ECS" tab / dict entry that accumulates across repeated F5 runs. The
-		# engine-owned remove_session_tab() detaches it from the debugger panel
-		# (and the session's internal tab list) before we free it; _setup_session
-		# creates a fresh tab if this session (or a new id) starts again.
-		_tabs.erase(session_id)
-		var session := get_session(session_id)
-		if session != null:
-			session.remove_session_tab(tab)
-		tab.queue_free()
+		# Keep the tab (issue #8): Godot 4.7 debugger sessions are persistent
+		# and reused — _setup_session runs only once per session, so removing +
+		# freeing the tab here made the "ECS" tab vanish forever after the first
+		# stop (no _setup_session call ever recreates it). Mark disconnected
+		# only; the next F5 re-activates it via _on_session_started.
 
 
 func _capture(message: String, data: Array, session_id: int) -> bool:
