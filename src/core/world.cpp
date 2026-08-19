@@ -31,6 +31,9 @@ World::~World() {
 
 Entity World::create_entity() {
 	Entity e = _alloc_entity_id();
+	if (!e) {
+		return e; // slot space exhausted (loud error already reported)
+	}
 	uint32_t row = empty_archetype_->add_entity(e, change_tick_);
 	entity_locations_[e] = { empty_archetype_, row };
 	_invalidate_cache();
@@ -237,7 +240,7 @@ void World::add_raw(Entity p_e, ComponentTypeId p_t, const void *p_data) {
 		} else {
 			std::memset(dst, 0, schema->size);
 		}
-		col.mark_changed(row, ++change_tick_);
+		col.mark_changed(row, _bump_tick());
 		if (col.has_versions()) {
 			_log_change(p_e, p_t, change_tick_);
 		}
@@ -262,7 +265,7 @@ void World::add_raw(Entity p_e, ComponentTypeId p_t, const void *p_data) {
 	} else {
 		std::memset(dst, 0, schema->size);
 	}
-	col.mark_changed(new_row, ++change_tick_);
+	col.mark_changed(new_row, _bump_tick());
 	if (col.has_versions()) {
 		_log_change(p_e, p_t, change_tick_);
 	}
@@ -319,7 +322,7 @@ void World::mark_changed(Entity p_e, ComponentTypeId p_t, const godot::String &p
 	}
 	Column &col = a->column(p_t);
 	col.ensure_versions(change_tick_);
-	col.mark_changed(it->second.row, ++change_tick_);
+	col.mark_changed(it->second.row, _bump_tick());
 	_log_change(p_e, p_t, change_tick_);
 	observer_dispatch_.dispatch(ObserverEventType::Changed, p_e, p_t, p_field, godot::Variant());
 }
@@ -450,9 +453,10 @@ void World::clear() {
 	}
 	_invalidate_cache();
 	// Drop the write log: after a wholesale replace, stale write entries would
-	// otherwise reference dead ids forever.
+	// otherwise reference dead ids forever. The generation bump invalidates any
+	// live ChangeView positions.
 	change_log_.clear();
-	change_log_pos_ = 0;
+	change_log_generation_++;
 	// Notify listeners (e.g. network sync) that the world was replaced wholesale,
 	// so they can drop their tracked state. Loading a save is not per-entity
 	// "death", hence the custom event instead of per-entity Removed events.
@@ -468,7 +472,7 @@ void World::reset() {
 	deferred_set_.clear();
 	custom_commands_.clear();
 	change_log_.clear();
-	change_log_pos_ = 0;
+	change_log_generation_++;
 	pool_slots_.clear();
 	suppress_depth_ = 0;
 	iteration_depth_ = 0;
@@ -525,6 +529,14 @@ Archetype *World::move_entity(Entity p_e, Archetype *p_target, uint32_t *r_row) 
 Entity World::_alloc_entity_id() {
 	uint32_t idx;
 	if (free_slots_.empty()) {
+		// Slot exhaustion guard (issue #3): ~4 billion live entities would wrap
+		// the uint32 slot index. create_entity_preassigned caps foreign ids far
+		// below this; the guard makes organic growth fail loudly instead of
+		// silently reusing slot 0.
+		if (slot_generations_.size() >= 0xFFFFFFFEu) {
+			ERR_PRINT("VortarisECS: entity slot space exhausted; cannot create more entities.");
+			return Entity{};
+		}
 		idx = static_cast<uint32_t>(slot_generations_.size());
 		slot_generations_.push_back(0);
 	} else {
@@ -664,7 +676,7 @@ void World::_commit_deferred_move(Entity p_e) {
 			const ComponentSchema *s = registry().schema_of(t);
 			std::memset(dst, 0, s->size);
 		}
-		col.mark_changed(row, ++change_tick_);
+		col.mark_changed(row, _bump_tick());
 		if (col.has_versions()) {
 			_log_change(p_e, t, change_tick_);
 		}
@@ -692,6 +704,29 @@ void World::_commit_deferred_move(Entity p_e) {
 
 void World::_log_change(Entity p_e, ComponentTypeId p_t, uint64_t p_tick) {
 	change_log_.push_back({ p_e, p_t, p_tick });
+	// Bound memory on very long runs (issue #1): halve the log past the soft
+	// cap. The generation bump tells live ChangeViews their positions are stale;
+	// each falls back to one layer-(a) scan and resyncs — nothing is missed.
+	if (change_log_.size() > CHANGE_LOG_SOFT_CAP) {
+		_compact_change_log();
+	}
+}
+
+void World::_compact_change_log() {
+	const size_t drop = change_log_.size() / 2;
+	change_log_.erase(change_log_.begin(), change_log_.begin() + drop);
+	change_log_generation_++;
+}
+
+uint64_t World::_bump_tick() {
+	// Saturate instead of wrapping (issue #3): after 2^64 writes the clock pins
+	// at UINT64_MAX. Wrapping to 0 would silently invert every
+	// `version > baseline` comparison (old rows reported as changed, new writes
+	// invisible); saturation is the conservative failure mode.
+	if (change_tick_ < UINT64_MAX) {
+		++change_tick_;
+	}
+	return change_tick_;
 }
 
 uint32_t World::_move_entity_to(Entity p_e, Archetype *p_from, Archetype *p_to, uint32_t p_from_row) {

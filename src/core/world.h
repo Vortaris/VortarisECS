@@ -132,7 +132,11 @@ public:
 
 	// ---- change clock ----
 	uint64_t change_tick() const { return change_tick_; }
-	void advance_change_tick() { ++change_tick_; }
+	// Saturates at UINT64_MAX instead of wrapping: a wrap to 0 would silently
+	// invert every `version > baseline` comparison; saturation is conservative
+	// (rows pinned at the max tick stop reporting NEW changes only after ~2^64
+	// writes, an unreachable runtime) — see docs (issue #3).
+	void advance_change_tick() { _bump_tick(); }
 
 	// ---- command buffer ----
 	CommandBuffer &commands() { return command_buffer_; }
@@ -183,6 +187,26 @@ public:
 
 	// ---- change log (ChangeView fast path) ----
 	const std::vector<ChangeLogEntry> &change_log() const { return change_log_; }
+	// Bumped every time the log is cleared or compacted: ChangeViews compare
+	// their cached copy against this to know their positions went stale.
+	uint64_t change_log_generation() const { return change_log_generation_; }
+	// First index whose entry tick is > p_tick (the log is tick-sorted because
+	// entries are appended with a strictly increasing tick). Lets a fresh
+	// ChangeView skip history it doesn't need instead of scanning from 0.
+	size_t change_log_lower_bound(uint64_t p_tick) const {
+		size_t lo = 0, hi = change_log_.size();
+		while (lo < hi) {
+			const size_t mid = lo + (hi - lo) / 2;
+			if (change_log_[mid].tick <= p_tick) {
+				lo = mid + 1;
+			} else {
+				hi = mid;
+			}
+		}
+		return lo;
+	}
+	// The change log never grows past this before being halved (issue #1).
+	static constexpr size_t CHANGE_LOG_SOFT_CAP = 1 << 16;
 
 	// ---- internals used by CommandBuffer / archetype transitions ----
 	Archetype *move_entity(Entity p_e, Archetype *p_target, uint32_t *r_row);
@@ -200,6 +224,12 @@ private:
 	// Records a component write in the change log (only called when the column
 	// has version tracking enabled, so untracked writes stay out of the log).
 	void _log_change(Entity p_e, ComponentTypeId p_t, uint64_t p_tick);
+	// Advances change_tick_ by one, saturating at UINT64_MAX (issue #3).
+	uint64_t _bump_tick();
+	// Drops the older half of the change log once it outgrows the soft cap.
+	// ChangeViews notice via change_log_generation() and fall back to one
+	// layer-(a) scan, so compacting never loses change detection (issue #1).
+	void _compact_change_log();
 
 	std::vector<uint32_t> slot_generations_;
 	std::vector<uint32_t> free_slots_;
@@ -230,7 +260,7 @@ private:
 	ObserverDispatch observer_dispatch_;
 	// Write log for ChangeView::take() (see ChangeLogEntry above).
 	std::vector<ChangeLogEntry> change_log_;
-	size_t change_log_pos_ = 0;
+	uint64_t change_log_generation_ = 0;
 };
 
 namespace detail {
@@ -433,51 +463,83 @@ public:
 		std::unordered_set<Entity> seen;
 		const auto &arches = world_->query_cache().match(query_, world_->all_archetypes());
 
-		// Layer (a): per-archetype fast-skip. If every watched column's max
-		// version is at or below the baseline, no row in that archetype can have
-		// changed — skip the whole archetype instead of scanning it. On the first
-		// take, ensure_versions stamps pre-existing rows with the current tick, so
-		// those rows report exactly once (same semantics as the old full scan).
-		for (Archetype *a : arches) {
-			bool present = false;
-			for (ComponentTypeId t : ids_) {
-				if (a->has_component(t)) {
-					a->column(t).ensure_versions(world_->change_tick());
-					present = true;
-				}
-			}
-			if (!present) {
-				continue;
-			}
-			bool skip = true;
-			for (ComponentTypeId t : ids_) {
-				if (a->has_component(t) && a->column(t).max_version() > baseline_) {
-					skip = false;
+		const uint64_t log_gen = world_->change_log_generation();
+		const bool log_invalidated = log_gen != log_gen_;
+		// Layer (a) is the correctness backstop; the change log is the fast path.
+		// A full per-archetype scan is needed when:
+		//  - this is the first take (ensure_versions must stamp existing rows so
+		//    they report exactly once — T31 semantics), or
+		//  - the matched archetype set changed (new archetypes must be stamped /
+		//    new members reported once), or
+		//  - the log was compacted/cleared behind our back (positions stale).
+		// In steady state (warmed up, same archetypes, log intact) layer (b)
+		// alone yields exactly the changed set in O(changes) — the old
+		// always-scan layer (a) made one dirty row cost an O(archetype) walk.
+		bool need_layer_a = !warmed_up_ || log_invalidated;
+		if (!need_layer_a && last_arches_.size() != arches.size()) {
+			need_layer_a = true;
+		} else if (!need_layer_a) {
+			for (size_t i = 0; i < arches.size(); ++i) {
+				if (arches[i] != last_arches_[i]) {
+					need_layer_a = true;
 					break;
 				}
 			}
-			if (skip) {
-				continue;
-			}
-			for (size_t row = 0; row < a->entities.size(); ++row) {
-				bool changed = false;
+		}
+
+		if (need_layer_a) {
+			// Layer (a): per-archetype fast-skip. If every watched column's max
+			// version is at or below the baseline, no row in that archetype can
+			// have changed — skip the whole archetype instead of scanning it. On
+			// the first take, ensure_versions stamps pre-existing rows with the
+			// current tick, so those rows report exactly once.
+			for (Archetype *a : arches) {
+				bool present = false;
 				for (ComponentTypeId t : ids_) {
-					if (a->has_component(t) && a->column(t).row_changed_since(row, baseline_)) {
-						changed = true;
+					if (a->has_component(t)) {
+						a->column(t).ensure_versions(world_->change_tick());
+						present = true;
+					}
+				}
+				if (!present) {
+					continue;
+				}
+				bool skip = true;
+				for (ComponentTypeId t : ids_) {
+					if (a->has_component(t) && a->column(t).max_version() > baseline_) {
+						skip = false;
 						break;
 					}
 				}
-				if (changed && seen.insert(a->entities[row]).second) {
-					out.push_back(a->entities[row]);
+				if (skip) {
+					continue;
+				}
+				for (size_t row = 0; row < a->entities.size(); ++row) {
+					bool changed = false;
+					for (ComponentTypeId t : ids_) {
+						if (a->has_component(t) && a->column(t).row_changed_since(row, baseline_)) {
+							changed = true;
+							break;
+						}
+					}
+					if (changed && seen.insert(a->entities[row]).second) {
+						out.push_back(a->entities[row]);
+					}
 				}
 			}
 		}
 
 		// Layer (b): incremental change-log collection. Writes to tracked columns
 		// were appended to the world log; consume the new entries and filter by
-		// watched component, liveness and current membership.
+		// watched component, liveness and current membership. Fresh / invalidated
+		// views binary-search their starting point (the log is tick-sorted)
+		// instead of walking the whole history from index 0.
 		const std::vector<ChangeLogEntry> &log = world_->change_log();
-		for (size_t i = log_pos_; i < log.size(); ++i) {
+		size_t start = log_pos_;
+		if (!warmed_up_ || log_invalidated) {
+			start = world_->change_log_lower_bound(baseline_);
+		}
+		for (size_t i = start; i < log.size(); ++i) {
 			const ChangeLogEntry &e = log[i];
 			if (e.tick <= baseline_) {
 				continue;
@@ -497,6 +559,9 @@ public:
 			}
 		}
 		log_pos_ = log.size();
+		log_gen_ = log_gen;
+		warmed_up_ = true;
+		last_arches_.assign(arches.begin(), arches.end());
 
 		baseline_ = world_->change_tick();
 		// Deterministic order (the pre-optimization scan order is not part of the
@@ -517,9 +582,12 @@ private:
 		return true;
 	}
 
-	World *world_;
-	uint64_t baseline_;
+	World *world_ = nullptr;
+	uint64_t baseline_ = 0;
 	size_t log_pos_ = 0;
+	uint64_t log_gen_ = 0;
+	bool warmed_up_ = false;
+	std::vector<Archetype *> last_arches_;
 	std::array<ComponentTypeId, sizeof...(Comps)> ids_;
 	Query query_;
 };
