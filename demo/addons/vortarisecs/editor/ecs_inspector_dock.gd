@@ -33,10 +33,9 @@ func _ready() -> void:
 	dump_button.pressed.connect(_dump_snapshot)
 	# Issue #6: entity ids / component / field values must be copyable.
 	entity_tree.set_meta("vecs_copy_helper", TreeCopy.new(entity_tree))
-	# The two info lines are selectable so their text can be copied too.
-	stats_label.mouse_filter = Control.MOUSE_FILTER_STOP
-	stats_label.text_selection_enabled = true
-	snapshot_label.text_selection_enabled = true
+	# The two info lines are plain Labels (Godot Label has no text selection);
+	# the entity tree's copy helper covers the ids / field values the issue asks
+	# for. Stats stay a simple read-only readout.
 	_resolve_world()
 
 
