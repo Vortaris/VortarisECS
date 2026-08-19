@@ -160,7 +160,7 @@ bool VECSWorld::register_component(const godot::String &p_name, const godot::Arr
 	}
 	const vortaris::ComponentTypeId tid = core_->registry().register_schema_component(godot::StringName(p_name), fds);
 	if (tid != vortaris::INVALID_COMPONENT_TYPE) {
-		vortaris::log_debug("registered component '" + p_name + "' (" + godot::String::num_int64(fds.size()) + " fields, type_id=" + godot::String::num_int64(tid) + ")");
+		vortaris::log_verbose("registered component '" + p_name + "' (" + godot::String::num_int64(fds.size()) + " fields, type_id=" + godot::String::num_int64(tid) + ")");
 	}
 	return tid != vortaris::INVALID_COMPONENT_TYPE;
 }
@@ -917,7 +917,7 @@ VECSWorld *VECSWorld::get_world() {
 godot::PackedByteArray VECSWorld::serialize_snapshot() const {
 	vortaris::BinaryBuffer buf;
 	core_->serialize_snapshot(buf);
-	vortaris::log_debug("snapshot serialized (" + godot::String::num_int64(static_cast<int64_t>(buf.size())) + " bytes)");
+	vortaris::log_verbose("snapshot serialized (" + godot::String::num_int64(static_cast<int64_t>(buf.size())) + " bytes)");
 	return buf.to_packed();
 }
 
@@ -925,7 +925,7 @@ bool VECSWorld::deserialize_snapshot(const godot::PackedByteArray &p_data) {
 	vortaris::BinaryBuffer buf;
 	buf.from_packed(p_data);
 	const bool ok = core_->deserialize_snapshot(buf);
-	vortaris::log_debug("snapshot deserialized (" + godot::String::num_int64(static_cast<int64_t>(p_data.size())) + " bytes, ok=" + (ok ? godot::String("true") : godot::String("false")) + ")");
+	vortaris::log_verbose("snapshot deserialized (" + godot::String::num_int64(static_cast<int64_t>(p_data.size())) + " bytes, ok=" + (ok ? godot::String("true") : godot::String("false")) + ")");
 	return ok;
 }
 
@@ -938,7 +938,7 @@ bool VECSWorld::register_components(const godot::Dictionary &p_components) {
 			return false;
 		}
 	}
-	vortaris::log_debug("batch-registered " + godot::String::num_int64(p_components.size()) + " components");
+	vortaris::log_verbose("batch-registered " + godot::String::num_int64(p_components.size()) + " components");
 	return true;
 }
 
@@ -1081,7 +1081,7 @@ godot::Dictionary VECSWorld::serialize_snapshot_json() {
 	out["version"] = static_cast<int64_t>(vortaris::SNAPSHOT_VERSION);
 	out["entities"] = entities_to_data();
 	const godot::Array ents = out["entities"];
-	vortaris::log_debug("snapshot JSON serialized (" + godot::String::num_int64(ents.size()) + " entities)");
+	vortaris::log_verbose("snapshot JSON serialized (" + godot::String::num_int64(ents.size()) + " entities)");
 	return out;
 }
 
@@ -1141,7 +1141,7 @@ bool VECSWorld::deserialize_snapshot_json(const godot::Variant &p_data) {
 		deserialize_snapshot_json(backup);
 		return false;
 	}
-	vortaris::log_debug("snapshot JSON loaded (" + godot::String::num_int64(spawned.size()) + " entities)");
+	vortaris::log_verbose("snapshot JSON loaded (" + godot::String::num_int64(spawned.size()) + " entities)");
 	return true;
 }
 
@@ -1174,7 +1174,7 @@ godot::Dictionary VECSWorld::deserialize_snapshot_json_mapped(const godot::Varia
 		deserialize_snapshot_json(backup);
 		return godot::Dictionary();
 	}
-	vortaris::log_debug("snapshot JSON loaded with id mapping (" + godot::String::num_int64(mapping.size()) + " entities)");
+	vortaris::log_verbose("snapshot JSON loaded with id mapping (" + godot::String::num_int64(mapping.size()) + " entities)");
 	return mapping;
 }
 
