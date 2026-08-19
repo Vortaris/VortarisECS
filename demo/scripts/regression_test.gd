@@ -101,6 +101,7 @@ func _initialize() -> void:
 	_test_t41_create_with_components(t)
 	_test_t42_gdscript_observer(t)
 	_test_t43_field_level_sync(t)
+	_test_t44_full_state_transactional(t)
 	print("total=", t.total, " failures=", t.failures)
 	if t.failures == 0:
 		print("=== VortarisECS Regression OK ===")
@@ -1579,3 +1580,59 @@ func _test_t43_field_level_sync(t: RefCounted) -> void:
 	c_ns.free()
 	cw.free()
 	sw.free()
+
+
+# T44: full-state packets are transactional (issue #4). A packet whose SECOND
+# entity carries an id that create_entity_preassigned refuses must not apply
+# its FIRST entity either — the client world has to stay exactly as it was.
+func _test_t44_full_state_transactional(t: RefCounted) -> void:
+	print("-- T44: full-state apply is transactional --")
+	var cw: VECSWorld = VECSWorld.new()
+	cw.register_component("NetT44", [{"name": "v", "type": "F32"}])
+	var e1: VECSEntity = cw.create_entity()
+	e1.add_component("NetT44", {"v": 111.0})
+	var e2: VECSEntity = cw.create_entity()
+	e2.add_component("NetT44", {"v": 222.0})
+	var c_ns: VECSNetworkSync = VECSNetworkSync.new()
+	c_ns.bind_world(cw)
+	var sess: int = c_ns.get_session_id()
+	var type_id: int = cw.get_component_type("NetT44").get_id()
+
+	# Full-state v2: entity A (valid id 5000, one component) followed by
+	# entity B whose id maps to a slot beyond the 16M runaway guard. Without
+	# the pre-flight pass, A would destroy+rebuild before B is rejected,
+	# leaving a half-applied world.
+	var pba := PackedByteArray()
+	pba.resize(2 + 4 + (8 + 2 + 4 + 1 + 4) * 2)
+	var o := 0
+	pba.encode_u16(o, 2); o += 2            # version = 2
+	pba.encode_u32(o, 2); o += 4            # n = 2
+	# entity A: id 5000, ncomp=1, type, mask=0b1, payload 42.0
+	for i in 8: pba.encode_u8(o + i, (5000 >> (i * 8)) & 0xFF)
+	o += 8
+	pba.encode_u16(o, 1); o += 2
+	for i in 4: pba.encode_u8(o + i, (type_id >> (i * 8)) & 0xFF)
+	o += 4
+	pba.encode_u8(o, 1); o += 1
+	pba.encode_float(o, 42.0); o += 4
+	# entity B: id whose slot exceeds the 16M guard
+	var bad_id: int = (1 << 24) + 2
+	for i in 8: pba.encode_u8(o + i, (bad_id >> (i * 8)) & 0xFF)
+	o += 8
+	pba.encode_u16(o, 1); o += 2
+	for i in 4: pba.encode_u8(o + i, (type_id >> (i * 8)) & 0xFF)
+	o += 4
+	pba.encode_u8(o, 1); o += 1
+	pba.encode_float(o, 43.0); o += 4
+
+	c_ns._rpc_full_state(pba, sess)
+	t.expect_eq(cw.entity_count(), 2, "T44: entity count untouched by rejected full-state")
+	var rows: Array = cw.query().with_all(["NetT44"]).execute()
+	var vals: Array = []
+	for r in rows:
+		vals.append(float(r.get_component("NetT44").get_field("v")))
+	vals.sort()
+	t.expect(vals == [111.0, 222.0], "T44: original component values intact (got %s)" % str(vals))
+
+	c_ns.free()
+	cw.free()
