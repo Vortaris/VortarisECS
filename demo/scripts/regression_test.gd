@@ -55,6 +55,13 @@ extends SceneTree
 #   T41 create_with_components + schema default filling (0/empty/false/array 0)
 #   T42 GDScript-usable observer (VECSObserver.new + set_callback +
 #       world.create_observer / world.on_changed, field filter + throttle)
+# 0.4.0 issue fixes + features:
+#   T43 wire v2 field-level sync_priority buckets (REALTIME immediate, LOW
+#       held back, SYNC_LOCAL never on the wire — spawn or delta)
+#   T44 full-state apply is transactional (bad id in packet #2 leaves the
+#       client world untouched)
+#   T45 GDScript subclass of VECSObserver (.new + _script_each) + on_event bus
+#   T46 register_components_from_csv (CC BasicComponent.csv pattern, idempotent)
 
 const EcsTestUtil := preload("res://scripts/ecs_test_util.gd")
 

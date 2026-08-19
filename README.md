@@ -20,7 +20,39 @@ Design reference: [GECS](https://github.com/BlockBreaker-Studios/GECS) — its a
 - **C++-first systems** — typed `world.for_each<Position, Velocity>` hot path with zero Variant overhead; group scheduling with dependency ordering, per-system timers and flush modes; GDScript systems via `_script_process`.
 - **Observers / events** — ADDED / REMOVED / CHANGED / MATCHED / UNMATCHED / custom events, re-entrancy safe.
 - **Deterministic binary serialization** — little-endian, fixed-width, byte-identical snapshots.
-- **Pluggable network sync** — `VECSSyncStrategy` abstraction with a default server-authoritative snapshot replication (dirty-checked deltas + periodic reconciliation + anti-ghost). Transport is Godot's MultiplayerAPI (RPC), with a direct in-process test transport.
+- **Pluggable network sync** — `VECSSyncStrategy` abstraction with a default server-authoritative snapshot replication (dirty-checked deltas + periodic reconciliation + anti-ghost). Transport is Godot's MultiplayerAPI (RPC), with a direct in-process test transport. Wire v2 replicates per-field `sync_priority` buckets and keeps `SYNC_LOCAL` fields off the wire entirely.
+- **Data-driven schema** — register components from a CSV table (`register_components_from_csv`), and subscribe to named events with `on_event`.
+
+## What's new in 0.4.0
+
+All 8 open issues fixed; audit hardening; easier basics + deeper advanced surface.
+
+- **Field-level network sync (wire v2)** — each field's `sync_priority` now
+  actually throttles replication: deltas send only the priority buckets that
+  are due, with explicit field masks; `SYNC_LOCAL` fields never cross the
+  wire (v1 leaked them on every send). v1 packets are still accepted.
+- **Transactional network / snapshot application** — `apply_full_state`
+  pre-flights every id before mutating the world; binary
+  `deserialize_snapshot` validates the whole payload before clearing. A
+  corrupt packet can no longer leave a half-applied or emptied world.
+- **Sparse `ChangeView::take()`** — steady-state change detection is
+  O(changes), and the change log is bounded (compaction never loses change
+  detection; the archetype scan stays as the correctness backstop).
+- **Wraparound safety** — the change clock saturates instead of wrapping;
+  entity-slot exhaustion fails loudly.
+- **Editor UX** — debugger tab survives stop/restart cycles (Godot 4.7
+  session reuse); Inspector Dock reopens after an X-close; every debugger /
+  inspector tree supports Ctrl+C + right-click copy; registration / snapshot
+  logs are verbose-gated.
+- **`world.on_event(name, callable)`** — named-event subscription sugar that
+  pairs with `emit_event`.
+- **`world.register_components_from_csv(path)`** — register component schemas
+  from a CSV (`id,name,schema` with a JSON field-descriptor column);
+  idempotent and self-contained.
+- **Declarative observers** — `class MyObs extends VECSObserver` + `.new()` +
+  `_script_each` override is regression-locked (see T45).
+
+See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the full per-issue breakdown.
 
 ## What's new in 0.3.1
 
@@ -149,6 +181,18 @@ VECSNetworkSync (Node, RPC)          ──────────► VECSSyncS
 > `deserialize_*` counterparts) and maps to the internal
 > `vortaris::BinaryBuffer` / snapshot codec — there is **no** `VECSBinaryBuffer`
 > class.
+
+### Threading contract (0.4.0)
+
+VortarisECS is **single-threaded by contract**: `VECSWorld`, iteration
+(`for_each` / `view` / `each`), observers, queries and the network strategy
+must all be used from the main thread. The internals (archetype columns, the
+change log, observer dispatch) are unsynchronized on purpose — that is what
+makes the hot path cheap. `ObserverDispatch` uses copy-on-write callback
+lists for *re-entrancy* safety (callbacks adding/removing observers during a
+dispatch), not for cross-thread safety. Do not call into a world from
+`WorkerThreadPool` tasks; parallel system scheduling is a roadmap item for a
+later release.
 
 ## Core API overview
 

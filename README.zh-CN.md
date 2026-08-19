@@ -17,7 +17,23 @@
 - **C++ 优先的系统** —— 类型化 `world.for_each<Position, Velocity>` 热路径零 Variant 开销；分组调度支持依赖排序、逐系统定时器与 flush 模式；GDScript 系统通过 `_script_process`。
 - **观察者 / 事件** —— ADDED / REMOVED / CHANGED / MATCHED / UNMATCHED / 自定义事件，支持重入安全。
 - **确定性二进制序列化** —— 小端、定宽、逐字节一致（byte-identical）的快照。
-- **可插拔网络同步** —— `VECSSyncStrategy` 抽象 + 默认的服务器权威快照复制（脏检查增量 + 定期对账 + 反幽灵）。传输层是 Godot 的 MultiplayerAPI（RPC），另附进程内直连测试传输。
+- **可插拔网络同步** —— `VECSSyncStrategy` 抽象 + 默认的服务器权威快照复制（脏检查增量 + 定期对账 + 反幽灵）。传输层是 Godot 的 MultiplayerAPI（RPC），另附进程内直连测试传输。Wire v2 按字段级 `sync_priority` 分桶复制，`SYNC_LOCAL` 字段完全不上网。
+- **数据驱动 schema** —— 从 CSV 表注册组件（`register_components_from_csv`），用 `on_event` 订阅命名事件。
+
+## 0.4.0 新特性
+
+修复全部 8 个 open issue；按 v0.1.3 审计与 CHANT / Composition Craft 集成研究加固长时运行与网络边界；扩展"易上手的基础 + 更强大的高级"表面。
+
+- **字段级网络同步（wire v2）** —— 每个字段的 `sync_priority` 现在真正参与节流：增量包只发送到期的优先级桶，并带显式字段掩码；`SYNC_LOCAL` 字段永不上网（v1 每次发送都会泄漏它们）。仍兼容接收 v1 包。
+- **事务化的网络 / 快照应用** —— `apply_full_state` 在改动世界前预检所有 id；二进制 `deserialize_snapshot` 在 `clear()` 之前先校验整个载荷。损坏的包不会再留下半应用或被清空的世界。
+- **稀疏 `ChangeView::take()`** —— 稳态变更检测为 O(changes)；变更日志有界（压缩不会丢失变更检测，archetype 扫描仍是正确性兜底）。
+- **回绕安全** —— 变更时钟饱和而非回绕；实体槽位耗尽时大声报错。
+- **编辑器体验** —— debugger 页签在停止/重启后仍在（Godot 4.7 session 复用）；Inspector Dock 用 X 关闭后可重新打开；所有 debugger / inspector 树支持 Ctrl+C 与右键复制；注册 / 快照日志受 verbose 门控。
+- **`world.on_event(name, callable)`** —— 命名事件订阅糖，与 `emit_event` 配对。
+- **`world.register_components_from_csv(path)`** —— 从 CSV 注册组件 schema（`id,name,schema` + JSON 字段描述符列）；幂等且自包含。
+- **声明式观察者** —— `class MyObs extends VECSObserver` + `.new()` + `_script_each` 覆写已被回归用例锁定（见 T45）。
+
+完整的逐 issue 说明见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
 ## 0.3.1 新特性
 

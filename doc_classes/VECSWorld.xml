@@ -401,6 +401,16 @@
 				订阅单个组件字段的值变化。仅当字段自上次派发以来真正改变值时，回调 [code]callable(entity, value)[/code] 才触发（写入相同值不触发）。返回可用 [method off] 注销的订阅 id。
 			</description>
 		</method>
+		<method name="on_event">
+			<return type="VECSObserver" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="callable" type="Callable" />
+			<description>
+				Event-bus subscription sugar (0.4.0). Creates an observer that delivers CUSTOM events named [param name] to [code]callable(event, entity, payload)[/code], and adds it to this world. Pairs with [method emit_event] as a lightweight decoupled channel between systems / mods / UI. Free the returned observer with [method remove_observer] when done.
+
+				事件总线订阅糖（0.4.0）。创建一个观察者，把名为 [param name] 的 CUSTOM 事件派发给 [code]callable(event, entity, payload)[/code]，并加入本世界。与 [method emit_event] 配对，作为系统 / mod / UI 之间的轻量解耦通道。用完后以 [method remove_observer] 释放返回的观察者。
+			</description>
+		</method>
 		<method name="pool_size" qualifiers="const">
 			<return type="int" />
 			<description>
@@ -444,6 +454,15 @@
 				Batch-registers several schema components at once: [code]{"Name": [{name, type, ...}, ...], ...}[/code]. Convenient for loading data tables (e.g. cards, items).
 
 				一次批量注册多个 schema 组件：[code]{"Name": [{name, type, ...}, ...], ...}[/code]。适合加载数据表（例如卡牌、物品）。
+			</description>
+		</method>
+		<method name="register_components_from_csv">
+			<return type="int" />
+			<param index="0" name="path" type="String" />
+			<description>
+				Data-driven schema registration (0.4.0). Reads a CSV whose header row contains a [code]schema[/code] column (a JSON array of field descriptors, exactly the per-field dictionaries [method register_component] accepts) plus a [code]name[/code] and/or [code]id[/code] column, and registers every data row as a component. The component name comes from the [code]name[/code] column; when it is empty it is derived from the [code]id[/code] suffix ([code]cc:component.transform[/code] → [code]transform[/code]). Already-registered names are skipped, so calling this at startup is idempotent. Returns the number of NEW components registered, or [code]-1[/code] when the file is unreadable or the header lacks the required columns. Self-contained: does not require the VortarisCSV plugin.
+
+				数据驱动的 schema 注册（0.4.0）。读取一个 CSV 表，其表头需含 [code]schema[/code] 列（字段描述符的 JSON 数组，元素与 [method register_component] 接受的逐字段字典完全一致），以及 [code]name[/code] 与/或 [code]id[/code] 列；每个数据行都会被注册为一个组件。组件名取自 [code]name[/code] 列；为空时从 [code]id[/code] 后缀推导（[code]cc:component.transform[/code] → [code]transform[/code]）。已注册的名字会被跳过，因此在启动时调用是幂等的。返回新注册的组件数量；文件不可读或表头缺少必需列时返回 [code]-1[/code]。自包含实现，不依赖 VortarisCSV 插件。
 			</description>
 		</method>
 		<method name="remap_reference">

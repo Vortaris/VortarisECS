@@ -1,5 +1,82 @@
 # VortarisECS Release Notes
 
+## 0.4.0
+
+Theme: fix every open issue (8), harden the long-run/network edges found by
+the v0.1.3 audit and the CHANT/Composition Craft integration research, and
+grow the "easy basics / powerful advanced" surface.
+
+### Issues fixed
+
+- **#8 ECS debugger tab survives session stop** — Godot 4.7 reuses debugger
+  sessions; `_setup_session` runs once, so the old "drop the tab on stop"
+  logic removed the ECS tab forever after the first stop. The tab now only
+  marks itself disconnected and re-activates on the next F5.
+- **#7 Inspector Dock reopens after X-close** — closing a dock with the X
+  button hides it without notifying the plugin; the Tools toggle now
+  re-attaches a live-but-hidden dock and tracks `visibility_changed`, so it
+  never dead-ends until restart.
+- **#6 editor GUI copy support** — every debugger-tab tree and the inspector
+  dock tree gained Ctrl/Cmd+C and a right-click Copy Cell / Copy Row menu
+  (`ecs_tree_copy.gd`); dock stat/snapshot labels are text-selectable.
+- **#5 verbose-gated registration logs** — `registered component`,
+  `batch-registered` and snapshot (de)serialization logs moved from
+  `log_debug` to `log_verbose`; quiet debug-build startup is achievable with
+  `vortarisecs/general/verbose=false`.
+- **#4 transactional full-state / snapshot application** — `apply_full_state`
+  pre-flights every entity id (malformed slot / runaway guard / duplicates)
+  before touching the world, and binary `deserialize_snapshot` validates the
+  whole payload BEFORE `clear()`. A corrupt packet can no longer leave a
+  half-applied or emptied world.
+- **#3 change-tick / slot wraparound** — `change_tick_` saturates at
+  UINT64_MAX instead of wrapping to 0 (which would invert every
+  `version > baseline` comparison), and entity slot allocation fails loudly
+  at exhaustion.
+- **#2 field-level sync_priority (wire v2)** — components now replicate per
+  FIELD priority: each schema derives a spawn mask (networked minus
+  SYNC_LOCAL) plus one delta bucket per distinct interval; deltas carry only
+  the due buckets with explicit field masks. Fixes the v1 bug where
+  SYNC_LOCAL fields were serialized on every send and a REALTIME+LOW
+  component shipped everything at REALTIME frequency. Receivers still accept
+  v1 packets.
+- **#1 ChangeView::take() sparse mode + bounded change log** — steady-state
+  `take()` consumes the change log in O(changes) and skips the per-archetype
+  scan unless it is actually needed (first take, archetype-set change, log
+  compaction). The log is capped at 64k entries; compaction never loses
+  change detection because the scan remains the correctness backstop.
+
+### Audit hardening
+
+- Observer PREDELETE no longer dereferences a possibly-freed world pointer
+  (the instance id is captured at `set_world` time).
+- Per-entity throttle state (`next_send_tick_`) is released when an entity
+  loses its networked components and again when its despawn is sent — no more
+  unbounded growth in long runs.
+
+### New features
+
+- `world.on_event(name, callable)` — event-bus subscription sugar; pairs with
+  `emit_event(name, entity, payload)` as a decoupled communication channel.
+- `world.register_components_from_csv(path)` — data-driven schema
+  registration (Composition Craft's BasicComponent.csv pattern): header
+  `id,name,schema` with a JSON field-descriptor array per row; idempotent;
+  self-contained CSV reader (no VortarisCSV dependency).
+- Declarative observers locked in with regression coverage: GDScript
+  subclasses of `VECSObserver` instantiate via `.new()` and receive events
+  through a `_script_each` override (CHANT PLUGIN_WARNINGS #7).
+
+### Contract documentation
+
+- README documents the single-threaded contract: `VECSWorld` and all
+  iteration/observer APIs are main-thread-only; parallel system scheduling is
+  a post-0.4 roadmap item.
+
+### Tests
+
+Regression suite grows from 286 to 309 assertions (T43 field-level sync,
+T44 transactional full-state, T45 observer subclass + event bus, T46 CSV
+schema registration), all green.
+
 ## 0.3.1 (unreleased)
 
 Changes driven by real usage research in the CHANT project (162 hand-written
