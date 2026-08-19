@@ -103,6 +103,7 @@ func _initialize() -> void:
 	_test_t43_field_level_sync(t)
 	_test_t44_full_state_transactional(t)
 	_test_t45_observer_subclass_and_event_bus(t)
+	_test_t46_schema_from_csv(t)
 	print("total=", t.total, " failures=", t.failures)
 	if t.failures == 0:
 		print("=== VortarisECS Regression OK ===")
@@ -1678,4 +1679,41 @@ func _test_t45_observer_subclass_and_event_bus(t: RefCounted) -> void:
 	bus_obs.free()
 	w.remove_observer(obs)
 	obs.free()
+	w.free()
+
+
+# T46: data-driven schema registration from CSV (0.4.0; Composition Craft's
+# BasicComponent.csv pattern). Header `id,name,schema`; schema column is a JSON
+# array of field descriptors (with CSV-doubled quotes), name may be derived
+# from id when the name column is empty. Idempotent on a second call.
+func _test_t46_schema_from_csv(t: RefCounted) -> void:
+	print("-- T46: register_components_from_csv --")
+	var csv_path := "user://t46_components.csv"
+	var lines: PackedStringArray = [
+		'id,name,schema',
+		'cc:component.transform,Transform,"[{""name"": ""pos"", ""type"": ""Vector2""}, {""name"": ""rot"", ""type"": ""F32""}]"',
+		'cc:component.health,,"[{""name"": ""hp"", ""type"": ""I32""}, {""name"": ""max"", ""type"": ""I32""}]"',
+	]
+	var f := FileAccess.open(csv_path, FileAccess.WRITE)
+	f.store_string("\n".join(lines) + "\n")
+	f.close()
+
+	var w: VECSWorld = VECSWorld.new()
+	var n: int = w.register_components_from_csv(csv_path)
+	t.expect_eq(n, 2, "T46: two components registered (got %d)" % n)
+	var ct = w.get_component_type("Transform")
+	t.expect(ct != null, "T46: explicit name column registered 'Transform'")
+	if ct != null:
+		t.expect_eq(ct.get_field_names().size(), 2, "T46: Transform has 2 fields")
+	var ct2 = w.get_component_type("health")
+	t.expect(ct2 != null, "T46: empty name derived from id suffix ('health')")
+	# Idempotent: a second pass registers nothing new.
+	t.expect_eq(w.register_components_from_csv(csv_path), 0, "T46: second call is a no-op (idempotent)")
+	# Malformed schema row reports and skips without aborting the batch.
+	var bad_path := "user://t46_bad.csv"
+	var fb := FileAccess.open(bad_path, FileAccess.WRITE)
+	fb.store_string('id,name,schema\ncc:x.broken,Broken,"not json at all"\ncc:x.ok,Ok,"[{""name"": ""v"", ""type"": ""F32""}]"\n')
+	fb.close()
+	t.expect_eq(w.register_components_from_csv(bad_path), 1, "T46: bad row skipped, good row still registered")
+	t.expect_eq(w.register_components_from_csv("user://does_not_exist.csv"), -1, "T46: missing file returns -1")
 	w.free()

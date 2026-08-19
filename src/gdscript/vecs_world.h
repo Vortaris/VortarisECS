@@ -215,6 +215,11 @@ public:
 	// ---- JSON / data-table helpers (deep Godot integration) ----
 	// Registers several schema components at once: { "Name": [ {name,type,...}, ... ], ... }
 	bool register_components(const godot::Dictionary &p_components);
+	// Data-driven schema registration (0.4.0): reads a CSV whose header row has
+	// a `schema` column (JSON array of field descriptors) plus `name` and/or
+	// `id`. Returns the number of NEW components registered, -1 on unreadable
+	// file / missing columns. Idempotent: already-registered names are skipped.
+	int64_t register_components_from_csv(const godot::String &p_path);
 	// Batch-creates entities from data: [{ "id"?: int, "components": { "Name": {fields...} } }, ...].
 	// Returns the created VECSEntity array (entities that failed to spawn are skipped).
 	godot::Array spawn_from_data(const godot::Array &p_entities);

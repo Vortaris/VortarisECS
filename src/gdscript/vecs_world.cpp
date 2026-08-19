@@ -4,6 +4,7 @@
 #include <unordered_set>
 
 #include <godot_cpp/classes/engine_debugger.hpp>
+#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/json.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
@@ -163,6 +164,144 @@ bool VECSWorld::register_component(const godot::String &p_name, const godot::Arr
 		vortaris::log_verbose("registered component '" + p_name + "' (" + godot::String::num_int64(fds.size()) + " fields, type_id=" + godot::String::num_int64(tid) + ")");
 	}
 	return tid != vortaris::INVALID_COMPONENT_TYPE;
+}
+
+namespace {
+// Minimal RFC-4180-lite CSV reader (quote-aware, "" escape, LF/CRLF/CR). Kept
+// inside VortarisECS so schema-CSV loading never depends on the VortarisCSV
+// plugin being installed. Good enough for machine-written schema tables; for
+// general-purpose CSV work use VortarisCSV.
+std::vector<std::vector<godot::String>> parse_simple_csv(const godot::String &p_text) {
+	std::vector<std::vector<godot::String>> rows;
+	std::vector<godot::String> row;
+	godot::String field;
+	bool in_quotes = false;
+	const int64_t len = p_text.length();
+	for (int64_t i = 0; i < len; ++i) {
+		const char32_t c = p_text[i];
+		if (in_quotes) {
+			if (c == U'"') {
+				if (i + 1 < len && p_text[i + 1] == U'"') {
+					field += U'"';
+					++i;
+				} else {
+					in_quotes = false;
+				}
+			} else {
+				field += c;
+			}
+			continue;
+		}
+		if (c == U'"') {
+			in_quotes = true;
+			continue;
+		}
+		if (c == U',') {
+			row.push_back(field);
+			field = godot::String();
+			continue;
+		}
+		if (c == U'\n' || c == U'\r') {
+			if (c == U'\r' && i + 1 < len && p_text[i + 1] == U'\n') {
+				++i;
+			}
+			row.push_back(field);
+			field = godot::String();
+			rows.push_back(row);
+			row.clear();
+			continue;
+		}
+		field += c;
+	}
+	if (!field.is_empty() || !row.empty()) {
+		row.push_back(field);
+		rows.push_back(row);
+	}
+	return rows;
+}
+} // namespace
+
+int64_t VECSWorld::register_components_from_csv(const godot::String &p_path) {
+	// Data-driven schema registration (0.4.0; Composition Craft pattern):
+	// a CSV with a header row containing `schema` (a JSON array of field
+	// descriptors, as accepted by register_component) plus `name` and/or `id`.
+	// Component name = `name` column; when missing it is derived from `id`
+	// (the segment after the last '.' or ':', e.g. "cc:component.transform"
+	// -> "transform"). Already-registered names are skipped, so calling this
+	// at startup is idempotent. Returns the number of NEW components
+	// registered, or -1 on unreadable file / missing columns.
+	if (!godot::FileAccess::file_exists(p_path)) {
+		ERR_PRINT("VortarisECS: register_components_from_csv: file not found: " + p_path);
+		return -1;
+	}
+	godot::PackedByteArray bytes = godot::FileAccess::get_file_as_bytes(p_path);
+	int64_t off = 0;
+	if (bytes.size() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) {
+		off = 3; // UTF-8 BOM
+	}
+	const godot::String text = godot::String::utf8(
+			reinterpret_cast<const char *>(bytes.ptr()) + off, bytes.size() - off);
+	const std::vector<std::vector<godot::String>> rows = parse_simple_csv(text);
+	if (rows.empty()) {
+		ERR_PRINT("VortarisECS: register_components_from_csv: empty file: " + p_path);
+		return -1;
+	}
+	int name_col = -1, schema_col = -1, id_col = -1;
+	for (int64_t c = 0; c < rows[0].size(); ++c) {
+		const godot::String h = rows[0][static_cast<size_t>(c)].strip_edges().to_lower();
+		if (h == "name") {
+			name_col = static_cast<int>(c);
+		} else if (h == "schema") {
+			schema_col = static_cast<int>(c);
+		} else if (h == "id") {
+			id_col = static_cast<int>(c);
+		}
+	}
+	if (schema_col < 0 || (name_col < 0 && id_col < 0)) {
+		ERR_PRINT("VortarisECS: register_components_from_csv: header must include 'schema' and either 'name' or 'id'.");
+		return -1;
+	}
+	int64_t registered = 0;
+	for (size_t r = 1; r < rows.size(); ++r) {
+		const std::vector<godot::String> &row = rows[r];
+		if (row.size() == 1 && row[0].strip_edges().is_empty()) {
+			continue; // blank line
+		}
+		godot::String name;
+		if (name_col >= 0 && name_col < static_cast<int>(row.size())) {
+			name = row[static_cast<size_t>(name_col)].strip_edges();
+		}
+		if (name.is_empty() && id_col >= 0 && id_col < static_cast<int>(row.size())) {
+			const godot::String idv = row[static_cast<size_t>(id_col)].strip_edges();
+			const int64_t dot = idv.rfind(".");
+			const int64_t colon = idv.rfind(":");
+			const int64_t cut = dot > colon ? dot : colon;
+			name = (cut >= 0) ? idv.substr(cut + 1) : idv;
+		}
+		if (name.is_empty()) {
+			ERR_PRINT("VortarisECS: register_components_from_csv: row " +
+					godot::String::num_int64(static_cast<int64_t>(r) + 1) + " has no component name; skipped.");
+			continue;
+		}
+		if (core_->registry().id_of(godot::StringName(name)) != vortaris::INVALID_COMPONENT_TYPE) {
+			continue; // idempotent startup: already registered
+		}
+		const godot::String schema_txt = (schema_col < static_cast<int>(row.size()))
+				? row[static_cast<size_t>(schema_col)]
+				: godot::String();
+		const godot::Variant parsed = godot::JSON::parse_string(schema_txt);
+		if (parsed.get_type() != godot::Variant::ARRAY) {
+			ERR_PRINT("VortarisECS: register_components_from_csv: '" + name +
+					"' schema column is not a JSON array; skipped.");
+			continue;
+		}
+		if (register_component(name, parsed)) {
+			++registered;
+		}
+	}
+	vortaris::log_verbose("register_components_from_csv: " + godot::String::num_int64(registered) +
+			" component(s) registered from " + p_path);
+	return registered;
 }
 
 godot::Ref<VECSComponentType> VECSWorld::get_component_type(const godot::String &p_name) {
@@ -1256,6 +1395,7 @@ void VECSWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("serialize_snapshot"), &VECSWorld::serialize_snapshot);
 	ClassDB::bind_method(D_METHOD("deserialize_snapshot", "data"), &VECSWorld::deserialize_snapshot);
 	ClassDB::bind_method(D_METHOD("register_components", "components"), &VECSWorld::register_components);
+	ClassDB::bind_method(D_METHOD("register_components_from_csv", "path"), &VECSWorld::register_components_from_csv);
 	ClassDB::bind_method(D_METHOD("spawn_from_data", "entities"), &VECSWorld::spawn_from_data);
 	ClassDB::bind_method(D_METHOD("spawn_from_data_mapped", "entities"), &VECSWorld::spawn_from_data_mapped);
 	ClassDB::bind_method(D_METHOD("entities_to_data", "max_entities"), &VECSWorld::entities_to_data, DEFVAL((int64_t)0));
