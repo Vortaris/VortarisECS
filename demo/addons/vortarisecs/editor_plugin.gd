@@ -46,18 +46,42 @@ func _toggle_inspector_dock() -> void:
 
 
 func _show_inspector_dock() -> void:
-	if _dock != null:
+	if _dock != null and is_instance_valid(_dock):
+		# The dock exists but is not showing. That happens after the user closed
+		# it with the dock's X button (issue #7): Godot hides/removes the control
+		# from the dock slot WITHOUT notifying the plugin, so the old
+		# `if _dock != null: return` early-out made the Tools entry dead — the
+		# dock could never be brought back without restarting the editor.
+		# Re-attach it when it fell out of the tree, then show it.
+		if not _dock.is_inside_tree():
+			add_control_to_dock(DOCK_SLOT_RIGHT_UL, _dock)
+		_dock.show()
+		_dock_visible = true
 		return
 	_dock = InspectorDockScene.instantiate()
+	# Track external visibility changes (the dock X button) so the toggle state
+	# never drifts from what the user actually sees.
+	_dock.visibility_changed.connect(_on_dock_visibility_changed)
 	add_control_to_dock(DOCK_SLOT_RIGHT_UL, _dock)
 	_dock_visible = true
+
+
+func _on_dock_visibility_changed() -> void:
+	if _dock == null or not is_instance_valid(_dock):
+		return
+	# X-closing a dock makes it invisible (and eventually detaches it); keep the
+	# toggle flag truthful so the next Tools click re-shows instead of hiding.
+	_dock_visible = _dock.visible
 
 
 func _hide_inspector_dock() -> void:
 	if _dock == null:
 		_dock_visible = false
 		return
-	remove_control_from_docks(_dock)
+	if _dock.visibility_changed.is_connected(_on_dock_visibility_changed):
+		_dock.visibility_changed.disconnect(_on_dock_visibility_changed)
+	if _dock.is_inside_tree():
+		remove_control_from_docks(_dock)
 	_dock.queue_free()
 	_dock = null
 	_dock_visible = false
