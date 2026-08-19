@@ -95,10 +95,11 @@ private:
 	double reconcile_accum_ = 0.0;
 	double reconciliation_interval_ = 30.0;
 	// sync_priority throttling: accumulated server time and the next send time
-	// per (entity, component). Components are sent at most once per their
-	// effective interval (fastest networked field tier).
+	// per (entity, component, bucket). Wire v2 (issue #2) splits a component's
+	// fields into one bucket per distinct sync interval; each bucket is due on
+	// its own cadence.
 	double elapsed_time_ = 0.0;
-	std::unordered_map<vortaris::Entity, std::unordered_map<vortaris::ComponentTypeId, double>> next_send_tick_;
+	std::unordered_map<vortaris::Entity, std::unordered_map<vortaris::ComponentTypeId, std::vector<double>>> next_send_tick_;
 };
 
 // Central network coordinator: binds one VECSWorld, owns a sync strategy and

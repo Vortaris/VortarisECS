@@ -100,6 +100,7 @@ func _initialize() -> void:
 	_test_t40_query_field_equals(t)
 	_test_t41_create_with_components(t)
 	_test_t42_gdscript_observer(t)
+	_test_t43_field_level_sync(t)
 	print("total=", t.total, " failures=", t.failures)
 	if t.failures == 0:
 		print("=== VortarisECS Regression OK ===")
@@ -1520,3 +1521,61 @@ func _test_t42_gdscript_observer(t: RefCounted) -> void:
 	obs4.free()
 
 	w.free()
+
+
+# T43: wire v2 field-level sync_priority buckets (issue #2). A component with
+# REALTIME + LOW + LOCAL fields must: replicate REALTIME immediately, hold LOW
+# back until its own interval elapses, and NEVER put LOCAL on the wire (spawn
+# or delta). The v1 bug replicated the whole component at the fastest field's
+# cadence, leaking LOCAL bytes entirely.
+func _test_t43_field_level_sync(t: RefCounted) -> void:
+	print("-- T43: field-level sync_priority buckets (wire v2) --")
+	var sw: VECSWorld = VECSWorld.new()
+	sw.register_component("NetT43", [
+		{"name": "fast", "type": "F32", "sync_priority": 0},    # SYNC_REALTIME
+		{"name": "slow", "type": "F32", "sync_priority": 3},    # SYNC_LOW (0.5s)
+		{"name": "secret", "type": "F32", "sync_priority": 5},  # SYNC_LOCAL
+	])
+	var cw: VECSWorld = VECSWorld.new()
+	var s_ns: VECSNetworkSync = VECSNetworkSync.new()
+	var c_ns: VECSNetworkSync = VECSNetworkSync.new()
+	s_ns.set_server(true)
+	s_ns.bind_world(sw)
+	c_ns.bind_world(cw)
+	s_ns.set_direct_peer(c_ns)
+
+	var se: VECSEntity = sw.create_entity()
+	se.add_component("NetT43", {"fast": 1.0, "slow": 2.0, "secret": 3.0})
+	s_ns.tick(0.016)  # spawn
+	var ce: VECSEntity = cw.query().with_all(["NetT43"]).execute()[0]
+	var cc = ce.get_component("NetT43")
+	t.expect_eq(cc.get_field("fast"), 1.0, "T43: REALTIME field present after spawn")
+	t.expect_eq(cc.get_field("slow"), 2.0, "T43: LOW field present after spawn")
+	t.expect_eq(cc.get_field("secret"), 0.0, "T43: LOCAL field excluded from spawn packet")
+
+	# Prime the LOW bucket (initial next-send is 0, so the first dirty pass is
+	# due); afterwards it is scheduled +0.5s out.
+	se.get_component("NetT43").set_field("slow", 20.0)
+	s_ns.tick(0.016)
+	t.expect_eq(ce.get_component("NetT43").get_field("slow"), 20.0, "T43: LOW field first sync (initial due)")
+
+	# Dirty all three fields, one short tick later: only REALTIME may move.
+	se.get_component("NetT43").set_field("fast", 10.0)
+	se.get_component("NetT43").set_field("slow", 21.0)
+	se.get_component("NetT43").set_field("secret", 30.0)
+	s_ns.tick(0.016)
+	t.expect_eq(ce.get_component("NetT43").get_field("fast"), 10.0, "T43: REALTIME field synced immediately")
+	t.expect_eq(ce.get_component("NetT43").get_field("slow"), 20.0, "T43: LOW field held back until its interval")
+	t.expect_eq(ce.get_component("NetT43").get_field("secret"), 0.0, "T43: LOCAL field never synced in deltas")
+
+	# Advance past the 0.5s LOW interval: the still-dirty slow bucket arrives.
+	for i in 40:
+		s_ns.tick(0.016)  # 0.64s total
+	t.expect_eq(ce.get_component("NetT43").get_field("slow"), 21.0, "T43: LOW field synced once its interval elapsed")
+	t.expect_eq(ce.get_component("NetT43").get_field("fast"), 10.0, "T43: REALTIME value unchanged by later bucket send")
+	t.expect_eq(ce.get_component("NetT43").get_field("secret"), 0.0, "T43: LOCAL field still excluded after many ticks")
+
+	s_ns.free()
+	c_ns.free()
+	cw.free()
+	sw.free()

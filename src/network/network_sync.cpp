@@ -13,7 +13,13 @@
 using namespace godot;
 
 namespace {
-constexpr uint16_t SYNC_VERSION = 1;
+// Wire format version. v2 (0.4.0) serializes components with explicit field
+// masks: SYNC_LOCAL fields never cross the wire and delta packets carry only
+// the sync_priority buckets that are due (issue #2). Receivers still accept
+// v1 packets (legacy full-component blocks) so mixed-version sessions degrade
+// gracefully instead of dropping traffic.
+constexpr uint16_t SYNC_VERSION = 2;
+constexpr uint16_t SYNC_VERSION_MIN = 1;
 constexpr int RPC_MODE_ANY_PEER = 2;
 
 void patch_u32(vortaris::BinaryBuffer &p_buf, size_t p_pos, uint32_t p_value) {
@@ -62,6 +68,97 @@ double component_interval(vortaris::ComponentTypeId p_t) {
 	return fastest;
 }
 
+// Wire v2 (issue #2): per-schema field-level replication plan.
+//  - spawn_mask: every networked field except SYNC_LOCAL (spawn / full-state
+//    packets replicate these; SYNC_LOCAL never crosses the wire).
+//  - buckets: one entry per DISTINCT delta interval among the fields, ordered
+//    by ascending interval (bucket 0 = fastest). Each carries the mask of the
+//    fields it replicates. Deltas send only the buckets that are due, so a
+//    REALTIME position + LOW inventory component no longer ships its inventory
+//    at REALTIME frequency.
+// Both peers derive the plan from the same schema with this same code, so
+// bucket indices and masks agree without any negotiation.
+struct FieldSyncPlan {
+	std::vector<bool> spawn_mask;
+	std::vector<double> bucket_intervals;
+	std::vector<std::vector<bool>> bucket_masks;
+	bool any_delta = false;
+};
+
+const FieldSyncPlan &sync_plan_for(vortaris::ComponentTypeId p_t) {
+	static std::unordered_map<vortaris::ComponentTypeId, FieldSyncPlan> plans;
+	auto it = plans.find(p_t);
+	if (it != plans.end()) {
+		return it->second;
+	}
+	FieldSyncPlan plan;
+	const vortaris::ComponentSchema *s = vortaris::ComponentRegistry::instance().schema_of(p_t);
+	if (s) {
+		plan.spawn_mask.assign(s->fields.size(), false);
+		std::vector<double> intervals;
+		for (const auto &f : s->fields) {
+			const bool net = f.is_networked && f.sync_priority != vortaris::SYNC_LOCAL;
+			const double iv = net ? priority_interval(f.sync_priority) : -1.0;
+			if (net) {
+				// SPAWN_ONLY (iv < 0) fields ride spawn/full-state only; the
+				// spawn mask still includes them.
+				plan.spawn_mask[&f - s->fields.data()] = true;
+			}
+			if (iv >= 0.0 && std::find(intervals.begin(), intervals.end(), iv) == intervals.end()) {
+				intervals.push_back(iv);
+			}
+		}
+		std::sort(intervals.begin(), intervals.end());
+		for (double iv : intervals) {
+			std::vector<bool> mask(s->fields.size(), false);
+			size_t idx = 0;
+			for (const auto &f : s->fields) {
+				const bool net = f.is_networked && f.sync_priority != vortaris::SYNC_LOCAL;
+				if (net && priority_interval(f.sync_priority) == iv) {
+					mask[idx] = true;
+				}
+				++idx;
+			}
+			plan.bucket_intervals.push_back(iv);
+			plan.bucket_masks.push_back(std::move(mask));
+		}
+		plan.any_delta = !plan.bucket_intervals.empty();
+	}
+	return plans.emplace(p_t, std::move(plan)).first->second;
+}
+
+void write_field_mask(vortaris::BinaryBuffer &p_buf, const std::vector<bool> &p_mask) {
+	const size_t bytes = vortaris::field_mask_bytes(p_mask.size());
+	for (size_t b = 0; b < bytes; ++b) {
+		uint8_t bits = 0;
+		for (size_t bit = 0; bit < 8; ++bit) {
+			const size_t i = b * 8 + bit;
+			if (i < p_mask.size() && p_mask[i]) {
+				bits |= static_cast<uint8_t>(1u << bit);
+			}
+		}
+		p_buf.write_u8(bits);
+	}
+}
+
+bool read_field_mask(vortaris::BinaryBuffer &p_buf, size_t p_field_count, std::vector<bool> &r_mask) {
+	r_mask.assign(p_field_count, false);
+	const size_t bytes = vortaris::field_mask_bytes(p_field_count);
+	for (size_t b = 0; b < bytes; ++b) {
+		uint8_t bits;
+		if (!p_buf.read_u8(bits)) {
+			return false;
+		}
+		for (size_t bit = 0; bit < 8; ++bit) {
+			const size_t i = b * 8 + bit;
+			if (i < p_field_count && (bits & (1u << bit)) != 0) {
+				r_mask[i] = true;
+			}
+		}
+	}
+	return true;
+}
+
 bool validate_packet(const vortaris::BinaryBuffer &p_data, SyncPacketKind p_kind) {
 	vortaris::BinaryBuffer in = p_data;
 	in.seek(0);
@@ -76,20 +173,57 @@ bool validate_packet(const vortaris::BinaryBuffer &p_data, SyncPacketKind p_kind
 	}
 
 	uint16_t version;
-	if (!in.read_u16(version) || version != SYNC_VERSION) {
+	if (!in.read_u16(version) || version < SYNC_VERSION_MIN || version > SYNC_VERSION) {
 		return false;
 	}
 
-	auto consume_component = [&in](uint32_t p_type) -> bool {
+	// Consumes one component payload. v1: fixed whole-component block.
+	// v2 spawn/full-state shape: field mask + masked field bytes (issue #2).
+	auto consume_component = [&in, version](uint32_t p_type) -> bool {
 		const vortaris::ComponentSchema *s = vortaris::ComponentRegistry::instance().schema_of(p_type);
 		if (!s) {
 			return false;
 		}
-		const size_t sz = vortaris::serialized_component_size(*s);
+		size_t sz;
+		if (version == 1) {
+			sz = vortaris::serialized_component_size(*s);
+		} else {
+			std::vector<bool> mask;
+			if (!read_field_mask(in, s->fields.size(), mask)) {
+				return false;
+			}
+			sz = vortaris::serialized_component_fields_size(*s, mask);
+		}
 		if (in.pos() + sz > in.size()) {
 			return false;
 		}
 		in.seek(in.pos() + sz);
+		return true;
+	};
+
+	// Consumes one v2 delta component record set: u8 record count, then per
+	// record bucket index + field mask + masked payload.
+	auto consume_delta_component_v2 = [&in](uint32_t p_type) -> bool {
+		const vortaris::ComponentSchema *s = vortaris::ComponentRegistry::instance().schema_of(p_type);
+		if (!s) {
+			return false;
+		}
+		uint8_t nrec;
+		if (!in.read_u8(nrec)) {
+			return false;
+		}
+		for (uint8_t r = 0; r < nrec; ++r) {
+			uint8_t bidx;
+			std::vector<bool> mask;
+			if (!in.read_u8(bidx) || !read_field_mask(in, s->fields.size(), mask)) {
+				return false;
+			}
+			const size_t sz = vortaris::serialized_component_fields_size(*s, mask);
+			if (in.pos() + sz > in.size()) {
+				return false;
+			}
+			in.seek(in.pos() + sz);
+		}
 		return true;
 	};
 
@@ -132,7 +266,11 @@ bool validate_packet(const vortaris::BinaryBuffer &p_data, SyncPacketKind p_kind
 			}
 			for (uint8_t j = 0; j < ncomp; ++j) {
 				uint32_t t;
-				if (!in.read_u32(t) || !consume_component(t)) {
+				if (!in.read_u32(t)) {
+					return false;
+				}
+				const bool ok = (version == 1) ? consume_component(t) : consume_delta_component_v2(t);
+				if (!ok) {
 					return false;
 				}
 			}
@@ -184,8 +322,15 @@ void VECSSnapshotReplication::serialize_component_block(VECSNetworkSync &p_ns, v
 	if (!data) {
 		return;
 	}
+	// Wire v2 spawn/full-state component record:
+	//   u32 type id | field mask (spawn set) | masked field bytes
+	// The mask makes SYNC_LOCAL fields unreachable from the wire (issue #2 bug:
+	// v1 serialized the whole component, leaking them) and keeps the reader
+	// robust if a schema gains fields.
+	const FieldSyncPlan &plan = sync_plan_for(p_t);
 	r_buf.write_u32(p_t);
-	vortaris::serialize_component(*s, data, r_buf);
+	write_field_mask(r_buf, plan.spawn_mask);
+	vortaris::serialize_component_fields(*s, data, r_buf, plan.spawn_mask);
 }
 
 void VECSSnapshotReplication::on_entity_component_added(VECSNetworkSync &p_ns, vortaris::Entity p_e, vortaris::ComponentTypeId p_t) {
@@ -284,23 +429,47 @@ void VECSSnapshotReplication::build_delta(VECSNetworkSync &p_ns, vortaris::Binar
 				cit = comp_set.erase(cit);
 				continue;
 			}
-			// Sync-priority throttle: components are sent at most once per their
-			// effective interval. Undue components stay dirty and are retried on
-			// a later tick; spawn-only components are never sent in deltas.
-			const double iv = component_interval(t);
-			if (iv < 0.0) {
+			// Wire v2 field-level throttle (issue #2): each sync_priority bucket
+			// of the component has its own cadence. Due buckets are serialized
+			// now; not-yet-due buckets keep the component dirty so they are
+			// retried on a later tick. Components with no delta-eligible fields
+			// (spawn-only / local) never appear in deltas.
+			const FieldSyncPlan &plan = sync_plan_for(t);
+			if (!plan.any_delta) {
 				cit = comp_set.erase(cit); // spawn-only / local: never in a delta
 				continue;
 			}
-			double &next = next_send_tick_[e][t];
-			if (elapsed_time_ < next) {
-				++cit; // not due yet: keep dirty for a later send
-				continue;
+			std::vector<double> &ticks = next_send_tick_[e][t];
+			if (ticks.size() < plan.bucket_intervals.size()) {
+				ticks.resize(plan.bucket_intervals.size(), 0.0);
 			}
-			serialize_component_block(p_ns, e, t, comp_buf);
-			++ncomp;
-			next = elapsed_time_ + iv;
-			cit = comp_set.erase(cit);
+			const void *data = w.get_raw(e, t);
+			const vortaris::ComponentSchema *s = vortaris::ComponentRegistry::instance().schema_of(t);
+			vortaris::BinaryBuffer rec_buf;
+			uint8_t nrec = 0;
+			bool all_sent = true;
+			for (size_t b = 0; b < plan.bucket_intervals.size(); ++b) {
+				if (elapsed_time_ < ticks[b]) {
+					all_sent = false; // not due yet: retry later
+					continue;
+				}
+				rec_buf.write_u8(static_cast<uint8_t>(b));
+				write_field_mask(rec_buf, plan.bucket_masks[b]);
+				vortaris::serialize_component_fields(*s, data, rec_buf, plan.bucket_masks[b]);
+				ticks[b] = elapsed_time_ + plan.bucket_intervals[b];
+				++nrec;
+			}
+			if (nrec > 0) {
+				comp_buf.write_u32(t);
+				comp_buf.write_u8(nrec);
+				comp_buf.write_bytes(rec_buf.data(), rec_buf.size());
+				++ncomp;
+			}
+			if (all_sent) {
+				cit = comp_set.erase(cit);
+			} else {
+				++cit; // some buckets still pending: stay dirty
+			}
 		}
 		const bool emptied = comp_set.empty();
 		if (ncomp > 0) {
@@ -341,9 +510,9 @@ void VECSSnapshotReplication::serialize_full_state(VECSNetworkSync &p_ns, vortar
 			for (size_t i = 0; i < a->component_ids.size(); ++i) {
 				vortaris::ComponentTypeId t = a->component_ids[i];
 				if (is_networked(t)) {
-					const vortaris::ComponentSchema *s = vortaris::ComponentRegistry::instance().schema_of(t);
-					comp_buf.write_u32(t);
-					vortaris::serialize_component(*s, a->columns[i].row(row), comp_buf);
+					// v2 spawn-format record (type + mask + masked fields); the
+					// mask keeps SYNC_LOCAL bytes off the wire.
+					serialize_component_block(p_ns, e, t, comp_buf);
 					++ncomp;
 				}
 			}
@@ -477,7 +646,7 @@ void VECSSnapshotReplication::apply_spawn(VECSNetworkSync &p_ns, const vortaris:
 	vortaris::BinaryBuffer in = p_data;
 	in.seek(0);
 	uint16_t version;
-	if (!in.read_u16(version) || version != SYNC_VERSION) {
+	if (!in.read_u16(version) || version < SYNC_VERSION_MIN || version > SYNC_VERSION) {
 		return;
 	}
 	uint64_t id;
@@ -503,8 +672,19 @@ void VECSSnapshotReplication::apply_spawn(VECSNetworkSync &p_ns, const vortaris:
 		}
 		w.add_raw(e, t, nullptr);
 		void *dst = w.get_raw(e, t);
-		if (!dst || !vortaris::deserialize_component(*s, dst, in)) {
+		if (!dst) {
 			return;
+		}
+		if (version == 1) {
+			if (!vortaris::deserialize_component(*s, dst, in)) {
+				return;
+			}
+		} else {
+			std::vector<bool> mask;
+			if (!read_field_mask(in, s->fields.size(), mask) ||
+					!vortaris::deserialize_component_fields(*s, dst, in, mask)) {
+				return;
+			}
 		}
 	}
 	client_replicated_.insert(e);
@@ -515,7 +695,7 @@ void VECSSnapshotReplication::apply_delta(VECSNetworkSync &p_ns, const vortaris:
 	vortaris::BinaryBuffer in = p_data;
 	in.seek(0);
 	uint16_t version;
-	if (!in.read_u16(version) || version != SYNC_VERSION) {
+	if (!in.read_u16(version) || version < SYNC_VERSION_MIN || version > SYNC_VERSION) {
 		return;
 	}
 	uint32_t n;
@@ -541,22 +721,69 @@ void VECSSnapshotReplication::apply_delta(VECSNetworkSync &p_ns, const vortaris:
 			if (!s) {
 				return;
 			}
-			if (!w.is_alive(e)) {
-				// The entity died locally (e.g. despawned while this delta was in
-				// flight). We still must consume the component's bytes so the read
-				// cursor stays aligned for the remaining entries; without this the
-				// following reads would parse component payloads as type ids.
-				static thread_local std::vector<uint8_t> scratch;
-				scratch.assign(s->size, 0);
-				if (!vortaris::deserialize_component(*s, scratch.data(), in)) {
+			if (version == 1) {
+				// Legacy whole-component block.
+				if (!w.is_alive(e)) {
+					// The entity died locally (e.g. despawned while this delta was
+					// in flight). We still must consume the component's bytes so
+					// the read cursor stays aligned for the remaining entries.
+					static thread_local std::vector<uint8_t> scratch;
+					scratch.assign(s->size, 0);
+					if (!vortaris::deserialize_component(*s, scratch.data(), in)) {
+						return;
+					}
+					continue;
+				}
+				w.add_raw(e, t, nullptr);
+				void *dst = w.get_raw(e, t);
+				if (!dst || !vortaris::deserialize_component(*s, dst, in)) {
 					return;
 				}
-				continue;
-			}
-			w.add_raw(e, t, nullptr);
-			void *dst = w.get_raw(e, t);
-			if (!dst || !vortaris::deserialize_component(*s, dst, in)) {
-				return;
+			} else {
+				// Wire v2: one record per due sync-priority bucket; each record
+				// carries its field mask. Unmasked fields keep their current
+				// value — that is the point of field-level throttling.
+				uint8_t nrec;
+				if (!in.read_u8(nrec)) {
+					return;
+				}
+				if (!w.is_alive(e)) {
+					// Dead locally: consume mask + masked payload without writing.
+					static thread_local std::vector<uint8_t> scratch;
+					for (uint8_t r = 0; r < nrec; ++r) {
+						uint8_t bidx;
+						std::vector<bool> mask;
+						if (!in.read_u8(bidx) || !read_field_mask(in, s->fields.size(), mask)) {
+							return;
+						}
+						const size_t sz = vortaris::serialized_component_fields_size(*s, mask);
+						if (in.pos() + sz > in.size()) {
+							return;
+						}
+						if (scratch.size() < sz) {
+							scratch.resize(sz);
+						}
+						if (!vortaris::deserialize_component_fields(*s, scratch.data(), in, mask)) {
+							return;
+						}
+					}
+					continue;
+				}
+				if (!w.has(e, t)) {
+					w.add_raw(e, t, nullptr);
+				}
+				void *dst = w.get_raw(e, t);
+				if (!dst) {
+					return;
+				}
+				for (uint8_t r = 0; r < nrec; ++r) {
+					uint8_t bidx;
+					std::vector<bool> mask;
+					if (!in.read_u8(bidx) || !read_field_mask(in, s->fields.size(), mask) ||
+							!vortaris::deserialize_component_fields(*s, dst, in, mask)) {
+						return;
+					}
+				}
 			}
 		}
 		if (w.is_alive(e)) {
@@ -570,7 +797,7 @@ void VECSSnapshotReplication::apply_full_state(VECSNetworkSync &p_ns, const vort
 	vortaris::BinaryBuffer in = p_data;
 	in.seek(0);
 	uint16_t version;
-	if (!in.read_u16(version) || version != SYNC_VERSION) {
+	if (!in.read_u16(version) || version < SYNC_VERSION_MIN || version > SYNC_VERSION) {
 		return;
 	}
 	uint32_t n;
@@ -614,7 +841,16 @@ void VECSSnapshotReplication::apply_full_state(VECSNetworkSync &p_ns, const vort
 				if (!s) {
 					return;
 				}
-				const size_t sz = vortaris::serialized_component_size(*s);
+				size_t sz;
+				if (version == 1) {
+					sz = vortaris::serialized_component_size(*s);
+				} else {
+					std::vector<bool> mask;
+					if (!read_field_mask(scan, s->fields.size(), mask)) {
+						return;
+					}
+					sz = vortaris::serialized_component_fields_size(*s, mask);
+				}
 				if (scan.pos() + sz > scan.size()) {
 					return;
 				}
@@ -656,8 +892,19 @@ void VECSSnapshotReplication::apply_full_state(VECSNetworkSync &p_ns, const vort
 			}
 			w.add_raw(e, t, nullptr);
 			void *dst = w.get_raw(e, t);
-			if (!dst || !vortaris::deserialize_component(*s, dst, in)) {
+			if (!dst) {
 				return;
+			}
+			if (version == 1) {
+				if (!vortaris::deserialize_component(*s, dst, in)) {
+					return;
+				}
+			} else {
+				std::vector<bool> mask;
+				if (!read_field_mask(in, s->fields.size(), mask) ||
+						!vortaris::deserialize_component_fields(*s, dst, in, mask)) {
+					return;
+				}
 			}
 		}
 	}
