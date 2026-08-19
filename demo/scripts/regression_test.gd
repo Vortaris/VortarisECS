@@ -102,6 +102,7 @@ func _initialize() -> void:
 	_test_t42_gdscript_observer(t)
 	_test_t43_field_level_sync(t)
 	_test_t44_full_state_transactional(t)
+	_test_t45_observer_subclass_and_event_bus(t)
 	print("total=", t.total, " failures=", t.failures)
 	if t.failures == 0:
 		print("=== VortarisECS Regression OK ===")
@@ -1636,3 +1637,45 @@ func _test_t44_full_state_transactional(t: RefCounted) -> void:
 
 	c_ns.free()
 	cw.free()
+
+
+# T45: declarative observer styles (0.4.0). GDScript SUBCLASSES of VECSObserver
+# must instantiate with .new() and receive events through a _script_each
+# override (CHANT PLUGIN_WARNINGS #7 pattern), and the new on_event() sugar
+# must deliver named custom events (lightweight event bus).
+func _test_t45_observer_subclass_and_event_bus(t: RefCounted) -> void:
+	print("-- T45: observer subclass + on_event bus --")
+	var w: VECSWorld = VECSWorld.new()
+	w.register_component("T45C", [{"name": "hp", "type": "F32"}])
+
+	# 1) GDScript subclass with an overridden _script_each.
+	var sub_script := GDScript.new()
+	sub_script.source_code = "extends VECSObserver\nvar hits := 0\nfunc _script_each(event: int, entity: VECSEntity, payload: Variant) -> void:\n\thits += 1\n"
+	sub_script.reload()
+	var obs = sub_script.new()
+	t.expect(obs != null, "T45: GDScript subclass of VECSObserver instantiates via .new()")
+	obs.on_added()
+	obs.on_changed()
+	obs.set_components(["T45C"])
+	w.add_observer(obs)
+	var e: VECSEntity = w.create_entity()
+	e.add_component("T45C", {"hp": 1.0})
+	e.get_component("T45C").set_field("hp", 2.0)
+	w.process(0.016, "")
+	t.expect_eq(int(obs.hits), 2, "T45: subclass _script_each received ADDED+CHANGED (got %d)" % int(obs.hits))
+
+	# 2) Event bus: on_event(name, callable) + emit_event(name, ...).
+	var received: Array = []
+	var bus_obs: VECSObserver = w.on_event("t45:ping", func(ev: int, ent: VECSEntity, payload: Variant):
+		received.append(payload))
+	w.emit_event("t45:ping", e, {"msg": "hello"})
+	w.emit_event("t45:other", e, {"msg": "ignored"})
+	t.expect_eq(received.size(), 1, "T45: on_event delivered only the named event")
+	if received.size() == 1:
+		t.expect_eq(str(received[0].get("msg", "")), "hello", "T45: payload round-trip")
+
+	w.remove_observer(bus_obs)
+	bus_obs.free()
+	w.remove_observer(obs)
+	obs.free()
+	w.free()

@@ -410,6 +410,18 @@ int64_t VECSWorld::emit_event(const godot::String &p_name, const godot::Ref<VECS
 	return static_cast<int64_t>(core_->emit_event(p_name, e, p_payload));
 }
 
+VECSObserver *VECSWorld::on_event(const godot::String &p_name, const godot::Callable &p_callable) {
+	// Event-bus sugar (0.4.0): subscribe a callable to a named CUSTOM event.
+	// Pairs with emit_event(name, entity, payload) as a general decoupled
+	// communication channel between systems / mods / UI.
+	VECSObserver *obs = memnew(VECSObserver);
+	obs->set_callback(p_callable);
+	obs->on_custom();
+	obs->set_custom_event_name(p_name);
+	add_observer(obs);
+	return obs;
+}
+
 int64_t VECSWorld::on_field_changed(const godot::String &p_comp, const godot::String &p_field, const godot::Callable &p_callable) {
 	vortaris::ComponentTypeId t = core_->registry().id_of(godot::StringName(p_comp));
 	if (t == vortaris::INVALID_COMPONENT_TYPE || !p_callable.is_valid()) {
@@ -1225,6 +1237,7 @@ void VECSWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("create_observer", "callable", "opts"), &VECSWorld::create_observer, DEFVAL(Dictionary()));
 	ClassDB::bind_method(D_METHOD("on_changed", "comp", "opts"), &VECSWorld::on_changed);
 	ClassDB::bind_method(D_METHOD("emit_event", "name", "entity", "payload"), &VECSWorld::emit_event, DEFVAL(Variant()));
+	ClassDB::bind_method(D_METHOD("on_event", "name", "callable"), &VECSWorld::on_event);
 	ClassDB::bind_method(D_METHOD("on_field_changed", "comp", "field", "callable"), &VECSWorld::on_field_changed);
 	ClassDB::bind_method(D_METHOD("off", "subscription_id"), &VECSWorld::off);
 	ClassDB::bind_method(D_METHOD("subscribe_event", "name", "callable"), &VECSWorld::subscribe_event);

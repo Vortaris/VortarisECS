@@ -130,6 +130,9 @@ public:
 	// Broadcasts a custom event; returns the number of observer callbacks that
 	// actually received it.
 	int64_t emit_event(const godot::String &p_name, const godot::Ref<VECSEntity> &p_entity, const godot::Variant &p_payload);
+	// Event-bus subscription sugar (0.4.0): returns an observer that delivers
+	// CUSTOM events named p_name to p_callable. Free with remove_observer().
+	VECSObserver *on_event(const godot::String &p_name, const godot::Callable &p_callable);
 	// Value-compared field subscription: the callback (entity, new_value) fires
 	// only when the field actually changed value since the last delivery.
 	// Returns a subscription id usable with off().
