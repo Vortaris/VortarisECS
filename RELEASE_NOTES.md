@@ -1,5 +1,15 @@
 # VortarisECS Release Notes
 
+## 0.4.1
+
+Editor GUI fix.
+
+- **Inspector Dock copy support (#6)** — the two stat/snapshot info lines were
+  setting `Label.text_selection_enabled`, a property Godot's `Label` does not
+  have; opening the dock raised a script error. They are plain read-only Labels
+  now. Entity ids / component / field values remain copyable through the dock's
+  tree copy helper (Ctrl+C / right-click).
+
 ## 0.4.0
 
 Theme: fix every open issue (8), harden the long-run/network edges found by
